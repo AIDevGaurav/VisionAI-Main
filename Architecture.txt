@@ -1,0 +1,17 @@
+/your_project
+│
+├── /app                 # Main application folder
+│   ├── __init__.py      # Application entry point
+│   ├── api.py           # Flask API routes
+│   ├── mqtt_handler.py  # MQTT client setup and handling
+│   ├── motion_detector.py # Motion detection logic with multiprocessing
+│   ├── utils.py         # Utility functions (e.g., video/image capturing)
+│   └── exceptions.py    # Custom exception handling
+│   └── config.py        # Central configuration file for the app, MQTT, etc.
+│
+├── /logs                # Log files directory
+|   |──log.app
+│
+├── requirements.txt     # Python dependencies
+├── Dockerfile           # Dockerfile for containerizing the application
+└── run.py               # Entry point for running the application
