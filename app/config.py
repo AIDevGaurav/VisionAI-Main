@@ -70,3 +70,12 @@ class YOLOv8armed:
             cls._instance.model = YOLO('Model/armed.pt')
         return cls._instance.model
 
+class YOLOv8pose:
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(YOLOv8armed, cls).__new__(cls)
+            cls._instance.model = YOLO('Model/yolo8l-pose.pt')
+        return cls._instance.model
+

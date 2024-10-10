@@ -1,153 +1,184 @@
-import cv2
-import cvzone  # Make sure you have cvzone installed
-import math
-import time
-from ultralytics import YOLO
-import multiprocessing
-from app.utils import capture_image, capture_video  # Assuming capture_image and capture_video are defined in utils
-from app.mqtt_handler import publish_message_mqtt as pub  # Assuming you have an MQTT handler setup
-from app.config import logger  # Assuming you have a logger setup in config
+import queue
+import threading
+import numpy as np
 from app.exceptions import FallError
+from app.utils import capture_image  # Assuming capture_image and capture_video are defined in utils
+from app.mqtt_handler import publish_message_mqtt as pub  # Assuming you have an MQTT handler setup
+from app.config import logger, global_thread, get_executor, queues_dict, YOLOv8pose
+import cv2
+import time
 
-# Global dictionary to keep track of processes
-tasks_processes = {}
 
-def fall_detect(rtsp_url, camera_id, site_id, display_width, display_height, types, stop_event):
-    # YOLO model (pre-trained on COCO dataset)
-    model = YOLO('Model/yolov8l.pt')
+# Function to adjust ROI points based on provided coordinates
+def set_roi_based_on_points(points, coordinates):
+    x_offset = coordinates["x"]
+    y_offset = coordinates["y"]
 
-    # COCO class names
-    classnames = [
-        'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
-        'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
-        'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
-        'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
-        'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
-        'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-        'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
-        'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
-        'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
-        'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
-    ]
+    scaled_points = []
+    for point in points:
+        scaled_x = int(point[0] + x_offset)
+        scaled_y = int(point[1] + y_offset)
+        scaled_points.append((scaled_x, scaled_y))
 
-    cap = cv2.VideoCapture(rtsp_url)
-    if not cap.isOpened():
-        print(f"Error: Unable to open video stream for camera {camera_id}")
-        return
+    return scaled_points
 
-    window_name = f'Fall Detection - Camera {camera_id}'
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)  # Create a window that can be resized
-
-    last_detection_time = 0
-    threshold_confidence = 50  # Adjust the threshold confidence value as needed
-
-    while not stop_event.is_set():
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame = cv2.resize(frame, (display_width, display_height))
-
-        # Run YOLO detection
-        results = model(frame)
-
-        for info in results:
-            parameters = info.boxes
-            for box in parameters:
-                x1, y1, x2, y2 = box.xyxy[0]
-                x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                confidence = box.conf[0]
-                class_detect = int(box.cls[0])
-                class_detect = classnames[class_detect]
-                conf = math.ceil(confidence * 100)
-
-                height = y2 - y1
-                width = x2 - x1
-                threshold = height - width
-
-                if conf > threshold_confidence and class_detect == 'person':
-                    cvzone.cornerRect(frame, [x1, y1, width, height], l=30, rt=6)
-                    cvzone.putTextRect(frame, f'{class_detect}', [x1 + 8, y1 - 12], thickness=2, scale=2)
-
-                    current_time = time.time()
-                    # Fall detection condition (if height < width)
-                    if threshold < 0 and (current_time - last_detection_time > 10):
-                        cvzone.putTextRect(frame, 'Fall Detected', [x1, y1], thickness=2, scale=2)
-
-                        frame_copy = frame.copy()
-                        image_filename = capture_image(frame_copy)
-                        video_filename = "testing" # capture_video(rtsp_url)
-
-                        message = {
-                            "cameraId": camera_id,
-                            "siteId": site_id,
-                            "type": types,
-                            "image": image_filename,
-                            "video": video_filename
-                        }
-                        # Publish MQTT message
-                        pub("fall/detection", message)
-                        last_detection_time = current_time
-
-        # Display the frame
-        cv2.imshow(window_name, frame)
-
-        # Break loop on 'q' key press
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyWindow(window_name)
-
-def fall_start(task, id1, typ, co):
-    camera_id = task["cameraId"]
+def capture_and_publish(frame, c_id, s_id, typ):
     try:
-        site_id = task["siteId"]
-        display_width = task["display_width"]
-        display_height = task["display_height"]
-        types = task["type"]
-        rtsp_url = task["rtsp_link"]
-        if camera_id not in tasks_processes:
-            stop_event = multiprocessing.Event()
-            tasks_processes[camera_id] = stop_event
+        image_path = capture_image(frame)  # Assuming this function saves the image and returns the path
+        message = {
+            "cameraId": c_id,
+            "siteId": s_id,
+            "type": typ,
+            "image": image_path,
+        }
+        pub("fall/detection", message)
+        logger.info(f"Published people message for camera {c_id}.")
+    except Exception as e:
+        logger.error(f"Error capturing image or publishing MQTT for camera {c_id}: {str(e)}")
 
-            # Start motion detection in a new process
-            process = multiprocessing.Process(
-                target=fall_detect,
-                args=(rtsp_url, camera_id, site_id, display_width, display_height, types, stop_event)
-            )
-            tasks_processes[camera_id] = process
-            process.start()
-            logger.info(f"Started fall detection for camera {camera_id}.")
+executor = get_executor()
+
+fall_detected_time = None  # To track when to remove the text
+
+# Function to extract keypoints for fall detection
+def extract_keypoints(data, conf):
+    keypoints = {
+        'left_ankle': data[15][:2] if conf[15] > 0.5 else None,
+        'right_ankle': data[16][:2] if conf[16] > 0.5 else None,
+        'left_shoulder': data[5][:2] if conf[5] > 0.5 else None,
+        'right_shoulder': data[2][:2] if conf[2] > 0.5 else None,
+        'left_hip': data[11][:2] if conf[11] > 0.5 else None,
+        'right_hip': data[8][:2] if conf[8] > 0.5 else None,
+    }
+    return keypoints
+
+# Example of handling missing keypoints and running fall detection logic
+def process_frame(data, conf):
+    global fall_detected_time
+
+    keypoints = extract_keypoints(data, conf)
+
+    # Check if all the necessary keypoints are available
+    if (keypoints['left_shoulder'] is not None and
+            keypoints['right_shoulder'] is not None and
+            keypoints['left_hip'] is not None and
+            keypoints['right_hip'] is not None and
+            keypoints['left_ankle'] is not None and
+            keypoints['right_ankle'] is not None):
+
+        # Get the y-coordinate of the ankles as the reference
+        ankle_y = (keypoints['left_ankle'][1] + keypoints['right_ankle'][1]) / 2
+
+        # Calculate the average height of shoulders and hips
+        shoulder_height = (keypoints['left_shoulder'][1] + keypoints['right_shoulder'][1]) / 2
+        hip_height = (keypoints['left_hip'][1] + keypoints['right_hip'][1]) / 2
+
+        # Check for sudden changes in position
+        if (abs(ankle_y - shoulder_height) < 80) and \
+           (abs(ankle_y - hip_height) < 80):
+            fall_detected_time = time.time()  # Start timer for displaying fall detection text
+
+def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
+    try:
+        model = YOLOv8pose()
+
+        if coordinates["points"]:
+            roi_points = np.array(set_roi_based_on_points(coordinates["points"], coordinates), dtype=np.int32)
+            roi_mask = np.zeros((height, width), dtype=np.uint8)
+            cv2.fillPoly(roi_mask, [roi_points], 255)  # Fill mask for the static ROI
+            logger.info(f"ROI set for motion detection on camera {camera_id}")
         else:
-            logger.warning(f"fall detection already running for camera {camera_id}.")
-            return False
+            roi_mask = None
+
+        while not stop_event.is_set():
+            # start_time = time.time()
+            frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
+            if frame is None:
+                continue
+
+            # # Log the queue size
+            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            # logger.info(f"people: {queue_size}")
+
+            if roi_mask is not None:
+                masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
+                cv2.polylines(frame, [roi_points], isClosed=True, color=(255, 0, 0), thickness=2)
+            else:
+                masked_frame = frame
+
+            # Run YOLOv8 inference on the masked frame
+            results = model(masked_frame, conf=0.3, iou=0.4, verbose=False)
+
+            for result in results:
+                if result.keypoints.conf is not None:
+                    xy_array = result.keypoints.xy.cpu().numpy()  # Convert to NumPy array
+                    conf_array = result.keypoints.conf.cpu().numpy()  # Get confidence values
+
+                    # Access individual keypoints from the xy array
+                    if xy_array.size > 0:
+                        for i in range(xy_array.shape[0]):  # Loop through each person's keypoints
+                            # Process for fall detection
+                            process_frame(xy_array[i], conf_array[i])
+
+                annotated_frame = result.plot(kpt_line=True, conf=False)  # Draw keypoints and connections
+
+            # Check if fall detection text should be displayed
+            if fall_detected_time and (time.time() - fall_detected_time) < 1:
+                cv2.putText(annotated_frame, "Fall Detected!", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                executor.submit(capture_and_publish, camera_id, s_id, typ)
+
+            # Show the annotated frame with fall detection text (if applicable)
+            cv2.imshow(f"YOLOv8 Pose- {camera_id}", annotated_frame)
+
+            # frame_end_time = time.time()
+            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
+            # logger.info(f"People_count {frame_processing_time_ms:.2f} milliseconds.")
+            # Break the loop on 'q' key press or window close
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
     except Exception as e:
-        logger.error(f"Failed to start detection process for camera {camera_id}: {str(e)}", exc_info=True)
+        logger.error(f"Error During Fall Detection:{str(e)}")
+        return FallError(f"Fall Detection Failed for camera : {camera_id}")
+
+    finally:
+        cv2.destroyWindow(f'YOLOv8 Pose- {camera_id}')
+
+def fall_start(c_id, s_id, typ, co, width, height):
+    """
+    Start the motion detection process in a separate thread for the given camera task.
+    """
+    try:
+        stop_event = threading.Event()  # Create a stop event for each feature
+        global_thread[f"{c_id}_{typ}"] = stop_event
+        executor.submit(fall_detect, c_id, s_id, typ, co, width, height, stop_event)
+
+        logger.info(f"Started pet detection for camera {c_id}.")
+
+    except Exception as e:
+        logger.error(f"Failed to start detection process for camera {c_id}: {str(e)}", exc_info=True)
         return False
     return True
 
-
-def fall_stop(camera_ids):
-    """
-    fire motion detection for the given camera IDs.
-    """
+def fall_stop(camera_id, typ):
     stopped_tasks = []
     not_found_tasks = []
 
-    for camera_id in camera_ids:
-        if camera_id in tasks_processes:
-            try:
-                tasks_processes[camera_id].terminate()  # Stop the process
-                tasks_processes[camera_id].join()  # Wait for the process to stop
-                del tasks_processes[camera_id]  # Remove from the dictionary
-                stopped_tasks.append(camera_id)
-                logger.info(f"Stopped fall detection for camera {camera_id}.")
-            except Exception as e:
-                logger.error(f"Failed to fall detection for camera {camera_id}: {str(e)}", exc_info=True)
+    key = f"{camera_id}_{typ}"  # Construct the key as used in the dictionary
+
+    try:
+        if key in global_thread and key in queues_dict:
+            stop_event = global_thread[key]  # Retrieve the stop event from the dictionary
+            stop_event.set()  # Signal the thread to stop
+            del global_thread[key]  # Delete the entry from the dictionary after setting the stop event
+            queues_dict[key] = queue.ShutDown
+            stopped_tasks.append(camera_id)
+            logger.info(f"Stopped motion detection and removed key for camera {camera_id} of type {typ}.")
         else:
             not_found_tasks.append(camera_id)
+            logger.warning(f"No active detection found for {camera_id} of type {typ}.")
+    except Exception as e:
+        logger.error(f"Error during stopping detection for {camera_id}: {str(e)}", exc_info=True)
 
     return {
         "success": len(stopped_tasks) > 0,

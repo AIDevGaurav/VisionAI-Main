@@ -2,7 +2,7 @@ import threading
 from flask import Blueprint, request, jsonify
 from app.utils import start_feature_processing
 from Features.Armed import armed_detection_stop, armed_detection_start
-from Features.Pet_detect import pet_start, pet_stop
+# from Features.Pet_detect import pet_start, pet_stop
 from Features.Zipline import zipline_start, zipline_stop
 from Features.fall import fall_stop, fall_start
 from Features.motion_detector import motion_start
@@ -39,13 +39,13 @@ def start():
                     start_pc(c_id, s_id, typ, co, width, height)
                 elif typ == "PET_DETECTION":
                     executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
-                    pet_start(c_id, s_id, typ, co, width, height)
+                    # pet_start(c_id, s_id, typ, co, width, height)
                 elif typ == "FIRE_DETECTION":
                     executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
                     fire_start(c_id, s_id, typ, co)
                 elif typ == "FALL_DETECTION":
                     executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
-                    fall_start(c_id, s_id, typ, co)
+                    fall_start(c_id, s_id, typ, co, width, height)
                 elif typ == "ZIP_LINE_CROSSING":
                     executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
                     zipline_start(c_id, s_id, typ, co)
