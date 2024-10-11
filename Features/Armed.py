@@ -1,50 +1,80 @@
-import cv2
-import multiprocessing
+import queue
+import threading
 import time
-import json
-from ultralytics import YOLO
-from app.utils import capture_image, capture_video
+import cv2
+import numpy as np
+from app.exceptions import PCError
+from app.config import logger, global_thread, queues_dict, get_executor, YOLOv8armed
 from app.mqtt_handler import publish_message_mqtt as pub
-from app.config import logger
+from app.utils import capture_image
 from app.exceptions import ArmError
 
 
+executor = get_executor()
 
-# Global dictionary to keep track of processes
-tasks_processes = {}
+# Function to adjust ROI points based on provided coordinates
+def set_roi_based_on_points(points, coordinates):
+    x_offset = coordinates["x"]
+    y_offset = coordinates["y"]
 
-def detect_armed_person(rtsp_url, camera_id, site_id, display_width, display_height, type, co_ordinate, stop_event):
+    scaled_points = []
+    for point in points:
+        scaled_x = int(point[0] + x_offset)
+        scaled_y = int(point[1] + y_offset)
+        scaled_points.append((scaled_x, scaled_y))
+
+    return scaled_points
+
+def capture_and_publish(frame, c_id, s_id, typ):
+    try:
+        image_path = capture_image(frame)  # Assuming this function saves the image and returns the path
+        message = {
+            "cameraId": c_id,
+            "siteId": s_id,
+            "type": typ,
+            "image": image_path,
+        }
+        pub("arm/detection", message)
+        logger.info(f"Published people message for camera {c_id}.")
+    except Exception as e:
+        logger.error(f"Error capturing image or publishing MQTT for camera {c_id}: {str(e)}")
+
+
+def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_event):
     """
     :tasks: Detect armed persons in the stream using YOLOv8.
     :return: Capture Image, Video and Publish Mqtt message
     """
     try:
-        # Load your trained YOLOv8 model
-        model = YOLO('Model/armed.pt')
-
-        # Armed person class indices (ID 0 for 'gun' and ID 1 for 'person with a gun')
-        armed_classes = [0, 1]  # Class IDs for armed persons (adjust based on model)
-
-        # Class names in your custom dataset
-        classnames = ['gun', 'person with a gun', 'person']  # Adjust as per your dataset
-
-        cap = cv2.VideoCapture(rtsp_url)
-        if not cap.isOpened():
-            raise ArmError(f"Failed to open Camera: {camera_id}")
-
+        model = YOLOv8armed()
         last_detection_time = 0
-        detection_delay = 10  # Time (in seconds) between consecutive detections
+
+        if coordinates and "points" in coordinates and coordinates["points"]:
+            roi_points = np.array(set_roi_based_on_points(coordinates["points"], coordinates), dtype=np.int32)
+            roi_mask = np.zeros((height, width), dtype=np.uint8)
+            cv2.fillPoly(roi_mask, [roi_points], 255)  # Fill mask for the static ROI
+            logger.info(f"ROI set for motion detection on camera {camera_id}")
+        else:
+            roi_mask = None
 
         while not stop_event.is_set():
-            ret, frame = cap.read()
-            if not ret:
-                logger.warning(f"Camera failed id: {camera_id}")
-                raise ArmError("Armed Cap Error")
+            start_time = time.time()
+            frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
+            if frame is None:
+                continue
 
-            frame = cv2.resize(frame, (display_width, display_height))
+            # Log the queue size
+            queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            logger.info(f"armed: {queue_size}")
 
-            # Run YOLO detection with confidence and NMS thresholds
-            results = model(frame, conf=0.5, iou=0.5)
+            if roi_mask is not None:
+                masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
+                cv2.polylines(frame, [roi_points], isClosed=True, color=(255, 0, 0), thickness=2)
+            else:
+                masked_frame = frame
+
+            # Run YOLOv8 inference on the masked frame
+            results = model(masked_frame, verbose=False)
 
             for info in results:
                 parameters = info.boxes
@@ -53,99 +83,71 @@ def detect_armed_person(rtsp_url, camera_id, site_id, display_width, display_hei
                     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                     class_detect = int(box.cls[0])
 
-                    current_time = time.time()
-
-                    if class_detect in armed_classes:
-                        if current_time - last_detection_time > detection_delay:
-                            class_name = classnames[class_detect]
-
+                    if class_detect in [0, 1]:
+                        if time.time() - last_detection_time > 10:
                             # Draw bounding box and label
                             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                            label = f'{class_name}'  # Include confidence score in the label
-                            cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-
-                            frame_copy = frame.copy()
-                            image_filename = capture_image(frame_copy)
-                            video_filename = "testing"  # Replace with actual video capture function
-
-                            # Publish MQTT message
-                            message = {
-                                "cameraId": camera_id,
-                                "class": class_name,
-                                "siteId": site_id,
-                                "type": type,
-                                "image": image_filename,
-                                "video": video_filename
-                            }
-                            pub("arm/detection", message)
-                            last_detection_time = current_time
+                            cv2.putText(frame, "Gun-Detected", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                            executor.submit(capture_and_publish, frame, camera_id, s_id, typ)
+                            last_detection_time = time.time()
 
             # Display the frame
             cv2.imshow(f'Armed Person Detection - Camera {camera_id}', frame)
 
-            # Break loop on 'q' key press
+            frame_end_time = time.time()
+            frame_processing_time_ms = (frame_end_time - start_time) * 1000
+            logger.info(f"Armed {frame_processing_time_ms:.2f} milliseconds.")
+
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
-        cap.release()
+    except Exception as e:
+        logger.error(f"Error During Armed detection:{str(e)}")
+        return PCError(f"Armed Detection Failed for camera : {camera_id}")
+
+    finally:
         cv2.destroyWindow(f'Armed Person Detection - Camera {camera_id}')
 
-    except Exception as e:
-        logger.error(f"Error for camera:{camera_id} in Armed Detection: {str(e)}")
-        raise ArmError(f"Error in Armed Detection for camera id {camera_id}")
 
-
-def armed_detection_start(task, id1, typ, co):
+def armed_start(c_id, s_id, typ, co, width, height):
     """
-    :param task: Json Array
-    tasks: Format the input data and start armed detection with multiprocessing for multiple cameras
-    :return: True or false
+    Start the motion detection process in a separate thread for the given camera task.
     """
     try:
-        camera_id = task["cameraId"]
-        site_id = task["siteId"]
-        display_width = task["display_width"]
-        display_height = task["display_height"]
-        types = task["type"]
-        rtsp_url = task["rtsp_link"]
-        co_ordinate = task["co_ordinates"]
-        if camera_id not in tasks_processes:
-            stop_event = multiprocessing.Event()
-            tasks_processes[camera_id] = stop_event
+        stop_event = threading.Event()  # Create a stop event for each feature
+        global_thread[f"{c_id}_{typ}_detect"] = stop_event
+        executor.submit(detect_armed_person, c_id, s_id, typ, co, width, height, stop_event)
 
-            # Start detection in a new process
-            process = multiprocessing.Process(target=detect_armed_person, args=(
-                rtsp_url, camera_id, site_id, display_width, display_height, types, co_ordinate, stop_event))
-            tasks_processes[camera_id] = process
-            process.start()
-            logger.info(f"Started Armed Detection for camera {camera_id}.")
-        else:
-            logger.warning(f"Armed Detection already running for camera {camera_id}.")
-            return False
+        logger.info(f"Started Armed detection for camera {c_id}.")
+
     except Exception as e:
-        logger.error(f"Failed to start detection process for camera {camera_id}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to start Armed detection process for camera {c_id}: {str(e)}", exc_info=True)
         return False
     return True
 
-def armed_detection_stop(camera_ids):
-    """
-    Stop armed detection for the given camera IDs.
-    """
+def armed_stop(camera_id, typ):
     stopped_tasks = []
     not_found_tasks = []
 
-    for camera_id in camera_ids:
-        if camera_id in tasks_processes:
-            try:
-                tasks_processes[camera_id].terminate()  # Stop the process
-                tasks_processes[camera_id].join()  # Wait for the process to stop
-                del tasks_processes[camera_id]  # Remove from the dictionary
-                stopped_tasks.append(camera_id)
-                logger.info(f"Stopped Armed Detection for camera {camera_id}.")
-            except Exception as e:
-                logger.error(f"Failed to stop Armed Detection for camera {camera_id}: {str(e)}", exc_info=True)
+    key = f"{camera_id}_{typ}"  # Construct the key as used in the dictionary
+
+    key2 = f"{camera_id}_{typ}_detect"
+
+    try:
+        if key in global_thread and key in queues_dict and key2 in global_thread:
+            stop_event = global_thread[key]  # Retrieve the stop event from the dictionary
+            stop_event.set()  # Signal the thread to stop
+            del global_thread[key]  # Delete the entry from the dictionary after setting the stop event
+            stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
+            stop_event.set()  # Signal the thread to stop
+            del global_thread[key2]  # Delete the entry from the dictionary after setting the stop event
+            stopped_tasks.append(camera_id)
+            logger.info(f"Stopped {typ} and removed key for camera {camera_id} of type {typ}.")
         else:
             not_found_tasks.append(camera_id)
+            logger.warning(f"No active detection found for {camera_id} of type {typ}.")
+    except Exception as e:
+        logger.error(f"Error during stopping detection for {camera_id}: {str(e)}", exc_info=True)
 
     return {
         "success": len(stopped_tasks) > 0,

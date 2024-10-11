@@ -124,7 +124,7 @@ def motion_start(c_id, s_id, typ, co, width, height):
     """
     try:
         stop_event = threading.Event()  # Create a stop event for each feature
-        global_thread[f"{c_id}_{typ}"] = stop_event
+        global_thread[f"{c_id}_{typ}_detect"] = stop_event
         executor.submit(detect_motion, c_id, s_id, typ, co, width, height, stop_event)
 
         logger.info(f"Started motion detection for camera {c_id}.")
@@ -140,14 +140,18 @@ def motion_stop(camera_id, typ):
 
     key = f"{camera_id}_{typ}"  # Construct the key as used in the dictionary
 
+    key2 = f"{camera_id}_{typ}_detect"
+
     try:
-        if key in global_thread and key in queues_dict:
+        if key in global_thread and key in queues_dict and key2 in global_thread:
             stop_event = global_thread[key]  # Retrieve the stop event from the dictionary
             stop_event.set()  # Signal the thread to stop
             del global_thread[key]  # Delete the entry from the dictionary after setting the stop event
-            queues_dict[key] = queue.ShutDown
+            stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
+            stop_event.set()  # Signal the thread to stop
+            del global_thread[key2]  # Delete the entry from the dictionary after setting the stop event
             stopped_tasks.append(camera_id)
-            logger.info(f"Stopped motion detection and removed key for camera {camera_id} of type {typ}.")
+            logger.info(f"Stopped {typ} and removed key for camera {camera_id} of type {typ}.")
         else:
             not_found_tasks.append(camera_id)
             logger.warning(f"No active detection found for {camera_id} of type {typ}.")

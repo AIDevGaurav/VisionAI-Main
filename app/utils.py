@@ -72,49 +72,62 @@ def capture_video(rtsp_url):
 def capture_frame(rtsp, c_id, typ, w, h, stop_event):
     """Capture frames from the RTSP stream and put them into the buffer."""
     cap = cv2.VideoCapture(rtsp)
+
     if not cap.isOpened():
-        print("Error opening video stream")
+        logger.error(f"Error opening video stream: {rtsp}")
         return
+
+    # logger.info(f"Started capturing from {rtsp} for {c_id}_{typ}")
 
     try:
         while not stop_event.is_set():
             ret, frame = cap.read()
-            frame = cv2.resize(frame, (w, h))
+
             if not ret:
-                logger.error("Failed to capture frame")
+                logger.error(f"Failed to capture frame from {rtsp}")
                 break
-            if not queues_dict[f"{c_id}_{typ}"].full():
-                queues_dict[f"{c_id}_{typ}"].put(frame)
+
+            # Resize the frame to the required width and height
+            frame = cv2.resize(frame, (w, h))
+
+            # Check if the queue is full before adding
+            key = f"{c_id}_{typ}"
+            if key not in queues_dict:
+                logger.error(f"Queue for {key} does not exist.")
+                break
+
+            if not queues_dict[key].full():
+                queues_dict[key].put(frame)
+                # logger.info(f"Frame added to queue: {key}. Queue size: {queues_dict[key].qsize()}")
             else:
-                logger.warning("Frame queue is full; adjusting capture settings.")
-                # Additional logic to handle full queue
+                logger.warning(f"Frame queue for {key} is full, skipping frame.")
+    except Exception as e:
+        logger.exception(f"Error occurred while capturing frames: {e}")
     finally:
         cap.release()
+        queues_dict.pop(f"{c_id}_{typ}")
+        print(queues_dict, global_thread)
+        logger.info(f"Released video capture for {rtsp}")
 
 
 def start_feature_processing(c_id, typ, rtsp, width, height):
     """
     Start processing for a specific camera and feature type.
-
-    :param c_id: Camera ID
-    :param typ: Type of feature to process (e.g., 'motion_detection')
-    :param rtsp: RTSP stream URL
-    :param width: Width of the frames to process
-    :param height: Height of the frames to process
     """
-    stop_event = None
     key = f"{c_id}_{typ}"
     executor = get_executor()
-    # Check if a queue already exists for this camera and type
-    if key not in queues_dict:
-        queues_dict[key] = queue.Queue()
-        # logger.info(f"Queue created for {key}")
 
+    # Initialize the queue if it doesn't exist
+    if key not in queues_dict:
+        queues_dict[key] = queue.Queue(maxsize=500)  # You can adjust maxsize as needed
+        logger.info(f"Queue created for {key} with maxsize {queues_dict[key].maxsize}")
+
+    # Initialize the stop event for controlling the thread
     if key not in global_thread:
         stop_event = threading.Event()
         global_thread[key] = stop_event
 
-    # Submit the task to the executor
-    executor.submit(capture_frame, rtsp, c_id, typ, width, height, stop_event)
-    # logger.info(f"Task submitted to executor for {key}")
+    # Submit the frame capture task to the executor
+    executor.submit(capture_frame, rtsp, c_id, typ, width, height, global_thread[key])
+    logger.info(f"Task submitted to executor for {key}")
 

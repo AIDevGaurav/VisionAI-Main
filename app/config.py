@@ -75,7 +75,7 @@ class YOLOv8pose:
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(YOLOv8armed, cls).__new__(cls)
-            cls._instance.model = YOLO('Model/yolo8l-pose.pt')
+            cls._instance = super(YOLOv8pose, cls).__new__(cls)
+            cls._instance.model = YOLO('C://Users/admin/PycharmProjects/Clone_Changes/Model/yolov8l-pose.pt')
         return cls._instance.model
 

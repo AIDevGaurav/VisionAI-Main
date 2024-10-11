@@ -32,7 +32,7 @@ def capture_and_publish(frame, c_id, s_id, typ):
             "image": image_path,
         }
         pub("fall/detection", message)
-        logger.info(f"Published people message for camera {c_id}.")
+        logger.info(f"Published fall message for camera {c_id}.")
     except Exception as e:
         logger.error(f"Error capturing image or publishing MQTT for camera {c_id}: {str(e)}")
 
@@ -82,23 +82,23 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
     try:
         model = YOLOv8pose()
 
-        if coordinates["points"]:
+        if coordinates and "points" in coordinates and coordinates["points"]:
             roi_points = np.array(set_roi_based_on_points(coordinates["points"], coordinates), dtype=np.int32)
             roi_mask = np.zeros((height, width), dtype=np.uint8)
             cv2.fillPoly(roi_mask, [roi_points], 255)  # Fill mask for the static ROI
-            logger.info(f"ROI set for motion detection on camera {camera_id}")
+            # logger.info(f"ROI set for motion detection on camera {camera_id}")
         else:
             roi_mask = None
 
         while not stop_event.is_set():
-            # start_time = time.time()
+            start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
-            # # Log the queue size
-            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-            # logger.info(f"people: {queue_size}")
+            # Log the queue size
+            queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            logger.info(f"fall: {queue_size}")
 
             if roi_mask is not None:
                 masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
@@ -120,20 +120,19 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
                             # Process for fall detection
                             process_frame(xy_array[i], conf_array[i])
 
-                annotated_frame = result.plot(kpt_line=True, conf=False)  # Draw keypoints and connections
-
             # Check if fall detection text should be displayed
             if fall_detected_time and (time.time() - fall_detected_time) < 1:
-                cv2.putText(annotated_frame, "Fall Detected!", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                cv2.putText(frame, "Fall Detected!", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 executor.submit(capture_and_publish, camera_id, s_id, typ)
 
             # Show the annotated frame with fall detection text (if applicable)
-            cv2.imshow(f"YOLOv8 Pose- {camera_id}", annotated_frame)
+            cv2.imshow(f"YOLOv8 Pose- {camera_id}", frame)
 
-            # frame_end_time = time.time()
-            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
-            # logger.info(f"People_count {frame_processing_time_ms:.2f} milliseconds.")
-            # Break the loop on 'q' key press or window close
+            frame_end_time = time.time()
+            frame_processing_time_ms = (frame_end_time - start_time) * 1000
+            logger.info(f"Fall {frame_processing_time_ms:.2f} milliseconds.")
+
+
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
@@ -150,13 +149,13 @@ def fall_start(c_id, s_id, typ, co, width, height):
     """
     try:
         stop_event = threading.Event()  # Create a stop event for each feature
-        global_thread[f"{c_id}_{typ}"] = stop_event
+        global_thread[f"{c_id}_{typ}_detect"] = stop_event
         executor.submit(fall_detect, c_id, s_id, typ, co, width, height, stop_event)
 
-        logger.info(f"Started pet detection for camera {c_id}.")
+        logger.info(f"Started fall detection for camera {c_id}.")
 
     except Exception as e:
-        logger.error(f"Failed to start detection process for camera {c_id}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to start fall detection process for camera {c_id}: {str(e)}", exc_info=True)
         return False
     return True
 
@@ -165,15 +164,18 @@ def fall_stop(camera_id, typ):
     not_found_tasks = []
 
     key = f"{camera_id}_{typ}"  # Construct the key as used in the dictionary
+    key2 = f"{camera_id}_{typ}_detect"
 
     try:
-        if key in global_thread and key in queues_dict:
+        if key in global_thread and key in queues_dict and key2 in global_thread:
             stop_event = global_thread[key]  # Retrieve the stop event from the dictionary
             stop_event.set()  # Signal the thread to stop
             del global_thread[key]  # Delete the entry from the dictionary after setting the stop event
-            queues_dict[key] = queue.ShutDown
+            stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
+            stop_event.set()  # Signal the thread to stop
+            del global_thread[key2]  # Delete the entry from the dictionary after setting the stop event
             stopped_tasks.append(camera_id)
-            logger.info(f"Stopped motion detection and removed key for camera {camera_id} of type {typ}.")
+            logger.info(f"Stopped {typ} and removed key for camera {camera_id} of type {typ}.")
         else:
             not_found_tasks.append(camera_id)
             logger.warning(f"No active detection found for {camera_id} of type {typ}.")
