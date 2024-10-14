@@ -1,5 +1,6 @@
 import threading
 from flask import Blueprint, request, jsonify
+
 from app.utils import start_feature_processing
 from Features.Armed import armed_stop, armed_start
 # from Features.Pet_detect import pet_start, pet_stop
@@ -14,6 +15,10 @@ from Features.fire import fire_stop, fire_start
 
 api_blueprint = Blueprint('api', __name__)
 executor = get_executor()
+
+@api_blueprint.route('/hello', methods=['GET'])
+def hello():
+    return "Hello"
 
 @api_blueprint.route('/start', methods=['POST'])
 def start():
@@ -83,45 +88,8 @@ def start():
         logger.info("Detection tasks started successfully from api file.")
         return jsonify({"success": True, "message": "Detection started"}), 200
     except CustomError as e:
-        return jsonify({"success": False, "error": str(e), "message": "Failed to start detection tasks."}), 400
+        logger.error("error", e)
+        return jsonify({"success": False, "message": "Failed to start detection tasks."}), 400
     except Exception as e:
         return handle_exception(e)
 
-#
-# @api_blueprint.route('/stop', methods=['POST'])
-# def stop_motion_detection():
-#     try:
-#         camera_ids = request.json.get('camera_ids', [])
-#         typ = request.json.get('type')
-#         if not isinstance(camera_ids, list):
-#             raise CustomError("'cameraIds' should be an array.")
-#
-#         if typ == "MOTION_DETECTION":
-#             pass
-#             # response = motion_stop(camera_ids)
-#         elif typ == "PET_DETECTION":
-#         # response = pet_stop(camera_ids)
-#         elif typ == "PEOPLE_COUNT":
-#             response = stop_pc(camera_ids)
-#         elif typ == "FIRE_DETECTION":
-#             response = fire_stop(camera_ids)
-#         elif typ == "FALL_DETECTION":
-#             response = fall_stop(camera_ids)
-#         elif typ == "ZIP_LINE_CROSSING":
-#             response = zipline_stop(camera_ids)
-#         elif typ == "ARM_DETECTION":
-#             response = armed_stop(camera_ids)
-#         else:
-#             return jsonify({"success": False, "message": "Invaild Type"}), 400
-#
-#         if response["success"]:
-#             logger.info(f"Detection stopped for cameras: {response['stopped']}")
-#         else:
-#             logger.warning(f"No active detection found for cameras: {response['not_found']}")
-#
-#         return jsonify(response), 200
-#
-#     except CustomError as e:
-#         return jsonify({"success": False, "error": str(e), "message": "Failed to stop detection tasks."}), 400
-#     except Exception as e:
-#         return handle_exception(e)

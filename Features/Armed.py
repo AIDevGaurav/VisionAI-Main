@@ -58,14 +58,14 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
             roi_mask = None
 
         while not stop_event.is_set():
-            start_time = time.time()
+            # start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
-            # Log the queue size
-            queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-            logger.info(f"armed: {queue_size}")
+            # # Log the queue size
+            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            # logger.info(f"armed: {queue_size}")
 
             if roi_mask is not None:
                 masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
@@ -94,9 +94,9 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
             # Display the frame
             cv2.imshow(f'Armed Person Detection - Camera {camera_id}', frame)
 
-            frame_end_time = time.time()
-            frame_processing_time_ms = (frame_end_time - start_time) * 1000
-            logger.info(f"Armed {frame_processing_time_ms:.2f} milliseconds.")
+            # frame_end_time = time.time()
+            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
+            # logger.info(f"Armed {frame_processing_time_ms:.2f} milliseconds.")
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break

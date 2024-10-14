@@ -106,7 +106,6 @@ def capture_frame(rtsp, c_id, typ, w, h, stop_event):
     finally:
         cap.release()
         queues_dict.pop(f"{c_id}_{typ}")
-        print(queues_dict, global_thread)
         logger.info(f"Released video capture for {rtsp}")
 
 
@@ -119,7 +118,7 @@ def start_feature_processing(c_id, typ, rtsp, width, height):
 
     # Initialize the queue if it doesn't exist
     if key not in queues_dict:
-        queues_dict[key] = queue.Queue(maxsize=500)  # You can adjust maxsize as needed
+        queues_dict[key] = queue.Queue(maxsize=150)  # You can adjust maxsize as needed
         logger.info(f"Queue created for {key} with maxsize {queues_dict[key].maxsize}")
 
     # Initialize the stop event for controlling the thread
