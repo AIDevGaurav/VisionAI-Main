@@ -163,7 +163,7 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
             for _, class_name in device_boxes:
                 print(f"{class_name} detected")
 
-            cv2.imshow(f"Camera {camera_id}_{typ}", frame)
+            cv2.imshow(f"FIRE {camera_id}_{typ}", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -172,8 +172,8 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
         logger.error(f"Error During Fire detection:{str(e)}")
         return PCError(f"Fire detection Failed for camera : {camera_id}")
 
-    # finally:
-    #     cv2.destroyWindow(f'People Count - Camera {camera_id}')
+    finally:
+        cv2.destroyWindow(f'FIRE {camera_id}_{typ}')
 
 
 def fire_start(c_id, s_id, typ, co, width, height, rtsp):
@@ -183,6 +183,7 @@ def fire_start(c_id, s_id, typ, co, width, height, rtsp):
     try:
         if f"{c_id}_{typ}_detect" in global_thread:
             fire_stop(c_id, typ)
+            time.sleep(2)
         executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
         stop_event = threading.Event()  # Create a stop event for each feature
         global_thread[f"{c_id}_{typ}_detect"] = stop_event
@@ -204,8 +205,8 @@ def fire_stop(camera_id, typ):
 
     try:
         if key in global_thread and key in queues_dict and key2 in global_thread:
-            stop_event = global_thread[key]  # Retrieve the stop event from the dictionary
-            stop_event.set()  # Signal the thread to stop
+            stop_event_detect = global_thread[key]  # Retrieve the stop event from the dictionary
+            stop_event_detect.set()  # Signal the thread to stop
             del global_thread[key]  # Delete the entry from the dictionary after setting the stop event
             stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
             stop_event.set()  # Signal the thread to stop

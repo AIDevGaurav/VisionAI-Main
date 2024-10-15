@@ -94,7 +94,7 @@ def detect_pet(camera_id, s_id, typ, coordinates, width, height, stop_event):
                     executor.submit(capture_and_publish, frame, camera_id, s_id, typ)
                     last_detection_time = current_time
 
-            cv2.imshow(f"Camera {camera_id}_{typ}", frame)
+            cv2.imshow(f"PET {camera_id}_{typ}", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -102,11 +102,14 @@ def detect_pet(camera_id, s_id, typ, coordinates, width, height, stop_event):
     except Exception as e:
         logger.error(f"Error During Pet detection:{str(e)}")
         return PCError(f"Pet detection Failed for camera : {camera_id}")
+    finally:
+        cv2.destroyWindow(f'PET {camera_id}_{typ}')
 
 def pet_start(c_id, s_id, typ, co, width, height, rtsp):
     try:
         if f"{c_id}_{typ}_detect" in global_thread:
             pet_stop(c_id, typ)
+            time.sleep(2)
         executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
         stop_event = threading.Event()
         global_thread[f"{c_id}_{typ}_detect"] = stop_event
@@ -126,12 +129,12 @@ def pet_stop(camera_id, typ):
 
     try:
         if key in global_thread and key in queues_dict and key2 in global_thread:
-            stop_event = global_thread[key]
-            stop_event.set()
-            del global_thread[key]
-            stop_event = global_thread[key2]
-            stop_event.set()
-            del global_thread[key2]
+            stop_event_detect = global_thread[key]  # Retrieve the stop event from the dictionary
+            stop_event_detect.set()  # Signal the thread to stop
+            del global_thread[key]  # Delete the entry from the dictionary after setting the stop event
+            stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
+            stop_event.set()  # Signal the thread to stop
+            del global_thread[key2]  # Delete the entry from the dictionary after setting the stop event
             stopped_tasks.append(camera_id)
             logger.info(f"Stopped {typ} and removed key for camera {camera_id} of type {typ}.")
         else:

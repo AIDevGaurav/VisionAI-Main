@@ -116,6 +116,7 @@ def detect_motion(c_id, s_id, typ, co, width, height, stop_event):
         raise MotionDetectionError(f"Motion detection failed for camera {c_id}: {str(e)}")
     finally:
         cv2.destroyWindow(f"Motion Detection - Camera {c_id}")
+        print(global_thread)
 
 
 def motion_start(c_id, s_id, typ, co, width, height, rtsp):
@@ -125,6 +126,7 @@ def motion_start(c_id, s_id, typ, co, width, height, rtsp):
     try:
         if f"{c_id}_{typ}_detect" in global_thread:
             motion_stop(c_id, typ)
+            time.sleep(2)
 
         executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
         stop_event = threading.Event()  # Create a stop event for each feature
@@ -154,7 +156,6 @@ def motion_stop(camera_id, typ):
             stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
             stop_event.set()  # Signal the thread to stop
             del global_thread[key2]  # Delete the entry from the dictionary after setting the stop event
-            print(queues_dict, "Motion")
             stopped_tasks.append(camera_id)
             logger.info(f"Stopped {typ} and removed key for camera {camera_id} of type {typ}.")
         else:

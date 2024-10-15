@@ -140,7 +140,7 @@ def detect_zipline(camera_id, s_id, typ, coordinates, width, height, stop_event)
                 cv2.arrowedLine(frame, arrow_start, arrow_end, (0, 255, 255), 2)
                 cv2.putText(frame, f"Count: {count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-                cv2.imshow(f"Camera {camera_id}_ {typ}", frame)
+                cv2.imshow(f"ZIPLINE {camera_id}_ {typ}", frame)
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     stop_event.set()
@@ -149,9 +149,9 @@ def detect_zipline(camera_id, s_id, typ, coordinates, width, height, stop_event)
             except Exception as e:
                 logger.error(f"Error during zipline detection: {str(e)}")
 
-    cv2.destroyAllWindows()
-    # finally:
-    #     cv2.destroyWindow(f'People Count - Camera {camera_id}')
+
+            finally:
+                cv2.destroyWindow(f'ZIPLINE {camera_id}_ {typ}')
 
 
 def zipline_start(c_id, s_id, typ, co, width, height, rtsp):
@@ -161,6 +161,7 @@ def zipline_start(c_id, s_id, typ, co, width, height, rtsp):
     try:
         if f"{c_id}_{typ}_detect" in global_thread:
             zipline_stop(c_id, typ)
+            time.sleep(2)
         executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
         stop_event = threading.Event()  # Create a stop event for each feature
         global_thread[f"{c_id}_{typ}_detect"] = stop_event
@@ -182,8 +183,8 @@ def zipline_stop(camera_id, typ):
 
     try:
         if key in global_thread and key in queues_dict and key2 in global_thread:
-            stop_event = global_thread[key]  # Retrieve the stop event from the dictionary
-            stop_event.set()  # Signal the thread to stop
+            stop_event_detect = global_thread[key]  # Retrieve the stop event from the dictionary
+            stop_event_detect.set()  # Signal the thread to stop
             del global_thread[key]  # Delete the entry from the dictionary after setting the stop event
             stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
             stop_event.set()  # Signal the thread to stop
