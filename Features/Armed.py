@@ -6,7 +6,7 @@ import numpy as np
 from app.exceptions import PCError
 from app.config import logger, global_thread, queues_dict, get_executor, YOLOv8armed
 from app.mqtt_handler import publish_message_mqtt as pub
-from app.utils import capture_image
+from app.utils import capture_image, start_feature_processing
 from app.exceptions import ArmError
 
 
@@ -109,11 +109,14 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
         cv2.destroyWindow(f'Armed Person Detection - Camera {camera_id}')
 
 
-def armed_start(c_id, s_id, typ, co, width, height):
+def armed_start(c_id, s_id, typ, co, width, height, rtsp):
     """
     Start the motion detection process in a separate thread for the given camera task.
     """
     try:
+        if f"{c_id}_{typ}_detect" in global_thread:
+            armed_stop(c_id, typ)
+        executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
         stop_event = threading.Event()  # Create a stop event for each feature
         global_thread[f"{c_id}_{typ}_detect"] = stop_event
         executor.submit(detect_armed_person, c_id, s_id, typ, co, width, height, stop_event)

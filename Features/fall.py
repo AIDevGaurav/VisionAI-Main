@@ -2,7 +2,8 @@ import queue
 import threading
 import numpy as np
 from app.exceptions import FallError
-from app.utils import capture_image  # Assuming capture_image and capture_video are defined in utils
+from app.utils import capture_image, \
+    start_feature_processing  # Assuming capture_image and capture_video are defined in utils
 from app.mqtt_handler import publish_message_mqtt as pub  # Assuming you have an MQTT handler setup
 from app.config import logger, global_thread, get_executor, queues_dict, YOLOv8pose
 import cv2
@@ -143,11 +144,14 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
     finally:
         cv2.destroyWindow(f'YOLOv8 Pose- {camera_id}')
 
-def fall_start(c_id, s_id, typ, co, width, height):
+def fall_start(c_id, s_id, typ, co, width, height, rtsp):
     """
     Start the motion detection process in a separate thread for the given camera task.
     """
     try:
+        if f"{c_id}_{typ}_detect" in global_thread:
+            fall_stop(c_id, typ)
+        executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
         stop_event = threading.Event()  # Create a stop event for each feature
         global_thread[f"{c_id}_{typ}_detect"] = stop_event
         executor.submit(fall_detect, c_id, s_id, typ, co, width, height, stop_event)

@@ -3,7 +3,7 @@ import threading
 import cv2
 import time
 import numpy as np
-from app.utils import capture_image
+from app.utils import capture_image, start_feature_processing
 from app.mqtt_handler import publish_message_mqtt as pub
 from app.config import logger, get_executor, global_thread, queues_dict
 from app.exceptions import MotionDetectionError
@@ -118,11 +118,15 @@ def detect_motion(c_id, s_id, typ, co, width, height, stop_event):
         cv2.destroyWindow(f"Motion Detection - Camera {c_id}")
 
 
-def motion_start(c_id, s_id, typ, co, width, height):
+def motion_start(c_id, s_id, typ, co, width, height, rtsp):
     """
     Start the motion detection process in a separate thread for the given camera task.
     """
     try:
+        if f"{c_id}_{typ}_detect" in global_thread:
+            motion_stop(c_id, typ)
+
+        executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
         stop_event = threading.Event()  # Create a stop event for each feature
         global_thread[f"{c_id}_{typ}_detect"] = stop_event
         executor.submit(detect_motion, c_id, s_id, typ, co, width, height, stop_event)
@@ -143,13 +147,14 @@ def motion_stop(camera_id, typ):
     key2 = f"{camera_id}_{typ}_detect"
 
     try:
-        if key in global_thread and key in queues_dict and key2 in global_thread:
-            stop_event = global_thread[key]  # Retrieve the stop event from the dictionary
-            stop_event.set()  # Signal the thread to stop
+        if key in queues_dict and key in global_thread and key2 in global_thread:
+            stop_event_detect = global_thread[key]  # Retrieve the stop event from the dictionary
+            stop_event_detect.set()  # Signal the thread to stop
             del global_thread[key]  # Delete the entry from the dictionary after setting the stop event
             stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
             stop_event.set()  # Signal the thread to stop
             del global_thread[key2]  # Delete the entry from the dictionary after setting the stop event
+            print(queues_dict, "Motion")
             stopped_tasks.append(camera_id)
             logger.info(f"Stopped {typ} and removed key for camera {camera_id} of type {typ}.")
         else:

@@ -6,7 +6,7 @@ import numpy as np
 from app.exceptions import PCError
 from app.config import logger, global_thread, queues_dict, YOLOv8Single, get_executor
 from app.mqtt_handler import publish_message_mqtt as pub
-from app.utils import capture_image
+from app.utils import capture_image, start_feature_processing
 
 executor = get_executor()
 
@@ -49,7 +49,7 @@ def people_count(camera_id, s_id, typ, coordinates, width, height, stop_event):
             roi_points = np.array(set_roi_based_on_points(coordinates["points"], coordinates), dtype=np.int32)
             roi_mask = np.zeros((height, width), dtype=np.uint8)
             cv2.fillPoly(roi_mask, [roi_points], 255)  # Fill mask for the static ROI
-            logger.info(f"ROI set for motion detection on camera {camera_id}")
+            logger.info(f"ROI set for people detection on camera {camera_id}")
         else:
             roi_mask = None
 
@@ -115,11 +115,15 @@ def people_count(camera_id, s_id, typ, coordinates, width, height, stop_event):
         cv2.destroyWindow(f'People Count - Camera {camera_id}')
 
 
-def start_pc(c_id, s_id, typ, co, width, height):
+def start_pc(c_id, s_id, typ, co, width, height, rtsp):
     """
     Start the motion detection process in a separate thread for the given camera task.
     """
     try:
+        if f"{c_id}_{typ}_detect" in global_thread:
+            stop_pc(c_id, typ)
+        print("hiiijdfbsdbghsdbgbsdrgb")
+        executor.submit(start_feature_processing, c_id, typ, rtsp, width, height)
         stop_event = threading.Event()  # Create a stop event for each feature
         global_thread[f"{c_id}_{typ}_detect"] = stop_event
         executor.submit(people_count, c_id, s_id, typ, co, width, height, stop_event)
@@ -146,6 +150,7 @@ def stop_pc(camera_id, typ):
             stop_event = global_thread[key2]  # Retrieve the stop event from the dictionary
             stop_event.set()  # Signal the thread to stop
             del global_thread[key2]  # Delete the entry from the dictionary after setting the stop event
+            del queues_dict[key]
             stopped_tasks.append(camera_id)
             logger.info(f"Stopped {typ} and removed key for camera {camera_id} of type {typ}.")
         else:

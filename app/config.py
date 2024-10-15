@@ -1,5 +1,7 @@
 import os
 import logging
+import threading
+
 import psutil
 from concurrent.futures import ThreadPoolExecutor
 from ultralytics import YOLO
@@ -45,11 +47,17 @@ def get_executor():
 
 class YOLOv8Single:
     _instance = None
+    _lock = threading.Lock()
 
     def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(YOLOv8Single, cls).__new__(cls)
-            cls._instance.model = YOLO('Model/yolov8l.pt')
+        with cls._lock:
+            if cls._instance is None:
+                logging.info("Loading YOLOv8 model...")
+                cls._instance = super(YOLOv8Single, cls).__new__(cls)
+                cls._instance.model = YOLO('Model/yolov8l.pt')
+                logging.info("Model loaded successfully.")
+            else:
+                logging.info("Reusing existing YOLOv8 model instance.")
         return cls._instance.model
 
 class YOLOv8fire:

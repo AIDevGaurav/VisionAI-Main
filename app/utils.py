@@ -106,6 +106,7 @@ def capture_frame(rtsp, c_id, typ, w, h, stop_event):
     finally:
         cap.release()
         queues_dict.pop(f"{c_id}_{typ}")
+        print(queues_dict)
         logger.info(f"Released video capture for {rtsp}")
 
 
