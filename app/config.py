@@ -45,45 +45,28 @@ class Executor:
 def get_executor():
     return Executor()
 
-class YOLOv8Single:
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        with cls._lock:
-            if cls._instance is None:
-                logging.info("Loading YOLOv8 model...")
-                cls._instance = super(YOLOv8Single, cls).__new__(cls)
-                cls._instance.model = YOLO('Model/yolov8l.pt')
-                logging.info("Model loaded successfully.")
-            else:
-                logging.info("Reusing existing YOLOv8 model instance.")
-        return cls._instance.model
-
-class YOLOv8fire:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(YOLOv8fire, cls).__new__(cls)
-            cls._instance.model = YOLO('Model/fire.pt')
-        return cls._instance.model
-
-class YOLOv8armed:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(YOLOv8armed, cls).__new__(cls)
-            cls._instance.model = YOLO('Model/armed.pt')
-        return cls._instance.model
-
-class YOLOv8pose:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(YOLOv8pose, cls).__new__(cls)
-            cls._instance.model = YOLO('C://Users/admin/PycharmProjects/Clone_Changes/Model/yolov8l-pose.pt')
-        return cls._instance.model
+# class YOLOv8Single:
+#     def __init__(self):
+#         logging.info("Loading YOLOv8 model...")
+#         self.model = YOLO('Model/yolov8l.pt')
+#         logging.info("Model loaded successfully.")
+#
+#
+# class YOLOv8fire:
+#     def __init__(self):
+#         logging.info("Loading YOLOv8 model...")
+#         self.model = YOLO('Model/fire.pt')
+#         logging.info("Model loaded successfully.")
+#
+# class YOLOv8armed:
+#     def __init__(self):
+#         logging.info("Loading YOLOv8 model...")
+#         self.model = YOLO('Model/armed.pt')
+#         logging.info("Model loaded successfully.")
+#
+# class YOLOv8pose:
+#     def __init__(self):
+#         logging.info("Loading YOLOv8 model...")
+#         self.model = YOLO('Model/yolov8l-pose.pt')
+#         logging.info("Model loaded successfully.")
 

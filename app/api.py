@@ -14,10 +14,6 @@ from Features.pet import pet_stop, pet_start
 api_blueprint = Blueprint('api', __name__)
 executor = get_executor()
 
-@api_blueprint.route('/hello', methods=['GET'])
-def hello():
-    return "Hello"
-
 @api_blueprint.route('/start', methods=['POST'])
 def start():
     try:
@@ -40,22 +36,16 @@ def start():
                     if typ == "MOTION_DETECTION":
                         motion_start(c_id, s_id, typ, co, width, height, rtsp)
                     elif typ == "PEOPLE_COUNT":
-
                         start_pc(c_id, s_id, typ, co, width, height, rtsp)
                     elif typ == "PET_DETECTION":
-
                         pet_start(c_id, s_id, typ, co, width, height, rtsp)
                     elif typ == "FIRE_DETECTION":
-
                         fire_start(c_id, s_id, typ, co,width,height, rtsp)
                     elif typ == "FALL_DETECTION":
-
                         fall_start(c_id, s_id, typ, co, width, height, rtsp)
                     elif typ == "ZIP_LINE_CROSSING":
-
                         zipline_start(c_id, s_id, typ, co,width,height, rtsp)
                     elif typ == "ARM_DETECTION":
-
                         armed_start(c_id, s_id, typ, co, width, height, rtsp)
                     else:
                         logger.error("Incorrect type provided check start if-else loop")

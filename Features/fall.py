@@ -1,11 +1,12 @@
 import queue
 import threading
 import numpy as np
+from ultralytics import YOLO
 from app.exceptions import FallError
 from app.utils import capture_image, \
     start_feature_processing  # Assuming capture_image and capture_video are defined in utils
 from app.mqtt_handler import publish_message_mqtt as pub  # Assuming you have an MQTT handler setup
-from app.config import logger, global_thread, get_executor, queues_dict, YOLOv8pose
+from app.config import logger, global_thread, get_executor, queues_dict
 import cv2
 import time
 
@@ -38,6 +39,7 @@ def capture_and_publish(frame, c_id, s_id, typ):
         logger.error(f"Error capturing image or publishing MQTT for camera {c_id}: {str(e)}")
 
 executor = get_executor()
+
 
 fall_detected_time = None  # To track when to remove the text
 
@@ -81,7 +83,7 @@ def process_frame(data, conf):
 
 def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
     try:
-        model = YOLOv8pose()
+        model = YOLO('Model/yolov8l-pose.pt')
 
         if coordinates and "points" in coordinates and coordinates["points"]:
             roi_points = np.array(set_roi_based_on_points(coordinates["points"], coordinates), dtype=np.int32)
@@ -92,23 +94,22 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
             roi_mask = None
 
         while not stop_event.is_set():
-            # start_time = time.time()
+            start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
             # # Log the queue size
             # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-            # logger.info(f"fall: {queue_size}")
+            # logger.info(f"fall---: {queue_size}")
 
             if roi_mask is not None:
                 masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-                cv2.polylines(frame, [roi_points], isClosed=True, color=(255, 0, 0), thickness=2)
             else:
                 masked_frame = frame
 
             # Run YOLOv8 inference on the masked frame
-            results = model(masked_frame, conf=0.3, iou=0.4, verbose=False)
+            results = model(masked_frame, conf=0.3, iou=0.4, stream=True, verbose=False)
 
             for result in results:
                 if result.keypoints.conf is not None:
@@ -122,27 +123,16 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
                             process_frame(xy_array[i], conf_array[i])
 
             # Check if fall detection text should be displayed
-            if fall_detected_time and (time.time() - fall_detected_time) < 1:
-                cv2.putText(frame, "Fall Detected!", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            if fall_detected_time and (time.time() - fall_detected_time) > 10:
                 executor.submit(capture_and_publish, camera_id, s_id, typ)
-
-            # Show the annotated frame with fall detection text (if applicable)
-            cv2.imshow(f"YOLOv8 Pose- {camera_id}", frame)
-
-            # frame_end_time = time.time()
-            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
-            # logger.info(f"Fall {frame_processing_time_ms:.2f} milliseconds.")
-
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            queues_dict[f"{camera_id}_{typ}"].task_done()
+            frame_end_time = time.time()
+            frame_processing_time_ms = (frame_end_time - start_time) * 1000
+            logger.info(f"fall----- {frame_processing_time_ms:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error During Fall Detection:{str(e)}")
         return FallError(f"Fall Detection Failed for camera : {camera_id}")
-
-    finally:
-        cv2.destroyWindow(f'YOLOv8 Pose- {camera_id}')
 
 def fall_start(c_id, s_id, typ, co, width, height, rtsp):
     """

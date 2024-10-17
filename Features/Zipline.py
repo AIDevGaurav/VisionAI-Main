@@ -4,7 +4,8 @@ import threading
 import time
 import cv2
 import numpy as np
-from app.config import logger, global_thread, queues_dict, get_executor, YOLOv8Single
+from ultralytics import YOLO
+from app.config import logger, global_thread, queues_dict, get_executor
 from app.mqtt_handler import publish_message_mqtt as pub
 from Features.sort import Sort
 from app.utils import capture_image, start_feature_processing
@@ -12,11 +13,6 @@ from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 
 executor = get_executor()
-
-
-# # Set up logging
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
 
 
 # Initialize SORT tracker
@@ -62,96 +58,94 @@ def is_movement_in_arrow_direction(prev_point, current_point, arrow_start, arrow
     return np.dot(movement_vector, arrow_vector) > 0
 
 def detect_zipline(camera_id, s_id, typ, coordinates, width, height, stop_event):
-    count = 0
-    frame_skip = 2
-    frame_count = 0
-    trackable_objects = {}
-    last_count_time = {}
-    debounce_time = 1
-    model = YOLOv8Single()
+    try:
+        count = 0
+        frame_skip = 2
+        frame_count = 0
+        trackable_objects = {}
+        last_count_time = {}
+        debounce_time = 1
+        model = YOLO('Model/yolov8n.pt')
 
-    roi_points = np.array(set_roi_based_on_points(coordinates["roi"]["points"], coordinates["roi"]), dtype=np.int32)
-    line_start, line_end = [tuple(p) for p in set_roi_based_on_points(coordinates["line"]["points"], coordinates["line"])]
-    arrow_start, arrow_end = [tuple(p) for p in set_roi_based_on_points(coordinates["arrow"]["points"], coordinates["arrow"])]
+        # roi_mask = np.zeros((height, width), dtype=np.uint8)
 
-    roi_mask = np.zeros((height, width), dtype=np.uint8)
-    cv2.fillPoly(roi_mask, [roi_points], 255)
+        if coordinates and "line" in coordinates and coordinates["line"]:
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+            roi_points = np.array(set_roi_based_on_points(coordinates["roi"]["points"], coordinates["roi"]),
+                                  dtype=np.int32)
+            roi_mask = np.zeros((height, width), dtype=np.uint8)
+            cv2.fillPoly(roi_mask, [roi_points], 255)
+            line_start, line_end = [tuple(p) for p in
+                                    set_roi_based_on_points(coordinates["line"]["points"], coordinates["line"])]
+            arrow_start, arrow_end = [tuple(p) for p in
+                                      set_roi_based_on_points(coordinates["arrow"]["points"], coordinates["arrow"])]
+
+        else:
+            roi_mask = None
+
         while not stop_event.is_set():
-            try:
-                frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)
-                if frame is None:
-                    continue
+            start_time = time.time()
+            frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)
+            if frame is None:
+                logger.warning(f"Received None frame for camera {camera_id}")
+                continue
+            # Log the queue size
+            queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            logger.info(f"zipline---: {queue_size}")
 
-                # Log the queue size
-                queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-                logger.info(f"Zipline: {queue_size}")
+            frame_count += 1
+            if frame_count % frame_skip != 0:
+                continue
 
-                frame_count += 1
-                if frame_count % frame_skip != 0:
-                    continue
+            masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
+            results = model(masked_frame, stream=True, verbose=False)
 
-                masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-                results = model(masked_frame, stream=True)
+            detections = np.empty((0, 5))
+            for r in results:
+                boxes = r.boxes
+                for box in boxes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    conf = float(box.conf[0])
+                    cls = int(box.cls[0])
+                    if cls == 0 and conf > 0.3:
+                        detections = np.vstack((detections, [x1, y1, x2, y2, conf]))
 
-                detections = np.empty((0, 5))
-                for r in results:
-                    boxes = r.boxes
-                    for box in boxes:
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        conf = float(box.conf[0])
-                        cls = int(box.cls[0])
-                        if cls == 0 and conf > 0.3:
-                            detections = np.vstack((detections, [x1, y1, x2, y2, conf]))
+            tracked_objects = tracker.update(detections)
 
-                tracked_objects = tracker.update(detections)
+            for obj in tracked_objects:
+                x1, y1, x2, y2, object_id = map(int, obj)
+                centroid = (int((x1 + x2) / 2), int((y1 + y2) / 2))
 
-                for obj in tracked_objects:
-                    x1, y1, x2, y2, object_id = map(int, obj)
-                    centroid = (int((x1 + x2) / 2), int((y1 + y2) / 2))
+                if object_id not in trackable_objects:
+                    to = TrackableObject(object_id, centroid)
+                    trackable_objects[object_id] = to
+                else:
+                    to = trackable_objects[object_id]
 
-                    if object_id not in trackable_objects:
-                        trackable_objects[object_id] = TrackableObject(object_id, centroid)
-                    else:
-                        to = trackable_objects[object_id]
-                        to.centroids.append(centroid)
+                to.centroids.append(centroid)
 
-                    if is_inside_roi(centroid, roi_points):
-                        if len(to.centroids) >= 2:
-                            prev_centroid = to.centroids[-2]
-                            current_centroid = to.centroids[-1]
+                if is_inside_roi(centroid, roi_points):
+                    if len(to.centroids) >= 2:
+                        prev_centroid = to.centroids[-2]
+                        current_centroid = to.centroids[-1]
 
-                            if is_crossing_line(prev_centroid, current_centroid, line_start, line_end):
-                                current_time = time.time()
-                                if current_time - last_count_time.get(object_id, 0) > debounce_time:
-                                    if is_movement_in_arrow_direction(prev_centroid, current_centroid, arrow_start, arrow_end):
-                                        count += 1
-                                        last_count_time[object_id] = current_time
-                                        executor.submit(capture_and_publish, frame, camera_id, s_id, typ, count)
+                        if is_crossing_line(prev_centroid, current_centroid, line_start, line_end):
+                            current_time = time.time()
+                            if current_time - last_count_time.get(object_id, 0) > debounce_time:
+                                if is_movement_in_arrow_direction(prev_centroid, current_centroid, arrow_start,
+                                                                  arrow_end):
+                                    count += 1
+                                    last_count_time[object_id] = current_time
+                                    executor.submit(capture_and_publish, frame, camera_id, s_id, typ, count)
 
-                    # Draw bounding box and centroid
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.circle(frame, centroid, 4, (0, 0, 255), -1)
+            queues_dict[f"{camera_id}_{typ}"].task_done()
+            frame_end_time = time.time()
+            frame_processing_time_ms = (frame_end_time - start_time) * 1000
+            logger.info(f"zipline----- {frame_processing_time_ms:.2f} milliseconds.")
 
-                # Draw overlay
-                cv2.polylines(frame, [roi_points], True, (255, 255, 0), 2)
-                cv2.line(frame, line_start, line_end, (255, 0, 0), 2)
-                cv2.arrowedLine(frame, arrow_start, arrow_end, (0, 255, 255), 2)
-                cv2.putText(frame, f"Count: {count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    except Exception as e:
+        logger.error(f"Error during zipline detection: {str(e)}")
 
-                cv2.imshow(f"ZIPLINE {camera_id}_ {typ}", frame)
-
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    stop_event.set()
-                    break
-
-            except Exception as e:
-                logger.error(f"Error during zipline detection: {str(e)}")
-
-
-            finally:
-                cv2.destroyWindow(f'ZIPLINE {camera_id}_ {typ}')
 
 
 def zipline_start(c_id, s_id, typ, co, width, height, rtsp):

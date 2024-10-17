@@ -5,7 +5,7 @@ from collections import deque
 import cv2
 import numpy as np
 from app.exceptions import PCError
-from app.config import logger, global_thread, queues_dict, get_executor, YOLOv8fire, YOLOv8Single
+from app.config import logger, global_thread, queues_dict, get_executor
 from app.mqtt_handler import publish_message_mqtt as pub
 from app.utils import capture_image, start_feature_processing
 from ultralytics import YOLO
@@ -70,8 +70,8 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
     """
     try:
 
-        fire_model = YOLOv8fire()
-        device_model = YOLOv8Single()
+        fire_model = YOLO('Model/fire.pt')
+        device_model = YOLO('Model/yolov8n.pt')
 
 
         # Define the devices we want to detect
@@ -81,44 +81,35 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
             roi_points = np.array(set_roi_based_on_points(coordinates["points"], coordinates), dtype=np.int32)
             roi_mask = np.zeros((height, width), dtype=np.uint8)
             cv2.fillPoly(roi_mask, [roi_points], 255)  # Fill mask for the static ROI
-            logger.info(f"ROI set for fire detection on camera {camera_id}")
         else:
             roi_mask = None
 
         fire_persistence = deque(maxlen=PERSISTENCE_THRESHOLD)
 
         while not stop_event.is_set():
-            # start_time = time.time()
+            start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(
                 timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
-            # # Log the queue size
-            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-            # logger.info(f"people: {queue_size}")
+            # Log the queue size
+            queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            logger.info(f"fire---: {queue_size}")
 
             if roi_mask is not None:
                 masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-                cv2.polylines(frame, [roi_points], isClosed=True, color=(255, 0, 0), thickness=2)
             else:
                 masked_frame = frame
 
             # Detect devices first
-            device_results = device_model(masked_frame)
+            device_results = device_model(masked_frame, stream=True, verbose=False)
             device_boxes = []
             for result in device_results:
                 for box in result.boxes:
                     class_name = device_model.names[int(box.cls[0])]
                     if class_name in DEVICES:
                         device_boxes.append((box.xyxy[0].cpu().numpy(), class_name))
-
-                    # Draw device boxes
-                    for box, class_name in device_boxes:
-                        x1, y1, x2, y2 = map(int, box)
-                        cv2.rectangle(masked_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(masked_frame, class_name, (x1, y1 - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
             # Create a mask to exclude device areas
             mask = create_mask(masked_frame, [box for box, _ in device_boxes])
@@ -127,7 +118,7 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
             fire_frame = cv2.bitwise_and(masked_frame, masked_frame, mask=mask)
 
             # Detect fires in the masked frame
-            fire_results = fire_model(fire_frame)
+            fire_results = fire_model(fire_frame, stream=True, verbose=False)
 
             current_fire_detected = False
             for result in fire_results:
@@ -146,9 +137,6 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
                             continue
 
                         current_fire_detected = True
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                        cv2.putText(frame, f'Fire ', (x1, y1 - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
             # Update fire persistence
             fire_persistence.append(current_fire_detected)
@@ -158,22 +146,17 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
 
             # Print detection status
             if fire_detected:
-                print("Fire detected!")
+                # print("Fire detected!")
                 executor.submit(capture_and_publish, fire_frame, camera_id, s_id, typ)
-            for _, class_name in device_boxes:
-                print(f"{class_name} detected")
 
-            cv2.imshow(f"FIRE {camera_id}_{typ}", frame)
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            queues_dict[f"{camera_id}_{typ}"].task_done()
+            frame_end_time = time.time()
+            frame_processing_time_ms = (frame_end_time - start_time) * 1000
+            logger.info(f"fire----- {frame_processing_time_ms:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error During Fire detection:{str(e)}")
         return PCError(f"Fire detection Failed for camera : {camera_id}")
-
-    finally:
-        cv2.destroyWindow(f'FIRE {camera_id}_{typ}')
 
 
 def fire_start(c_id, s_id, typ, co, width, height, rtsp):
@@ -189,7 +172,7 @@ def fire_start(c_id, s_id, typ, co, width, height, rtsp):
         global_thread[f"{c_id}_{typ}_detect"] = stop_event
         executor.submit(detect_fire, c_id, s_id, typ, co, width, height, stop_event)
 
-        logger.info(f"Started motion detection for camera {c_id}.")
+        logger.info(f"Started Fire detection for camera {c_id}.")
 
     except Exception as e:
         logger.error(f"Failed to start detection process for camera {c_id}: {str(e)}", exc_info=True)

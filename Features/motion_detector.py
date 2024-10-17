@@ -71,7 +71,6 @@ def detect_motion(c_id, s_id, typ, co, width, height, stop_event):
 
             if roi_mask is not None:
                 masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-                cv2.polylines(frame, [roi_points], isClosed=True, color=(255, 0, 0), thickness=2)
             else:
                 masked_frame = frame
 
@@ -91,8 +90,6 @@ def detect_motion(c_id, s_id, typ, co, width, height, stop_event):
 
             for contour in contours:
                 if cv2.contourArea(contour) > 1000:
-                    (x, y, w, h) = cv2.boundingRect(contour)
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                     motion_detected = True
 
             if motion_detected and (time.time() - last_detection_time > 10):
@@ -100,23 +97,12 @@ def detect_motion(c_id, s_id, typ, co, width, height, stop_event):
                 executor.submit(capture_and_publish, frame, c_id, s_id, typ)
                 last_detection_time = time.time()
 
-            cv2.imshow(f"Motion Detection - Camera {c_id}", frame)
             prev_frame_gray = gray_frame
             queues_dict[f"{c_id}_{typ}"].task_done()
-
-            # frame_end_time = time.time()
-            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
-            # logger.info(f"motion----- {frame_processing_time_ms:.2f} milliseconds.")
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
 
     except Exception as e:
         logger.error(f"Error during motion detection for camera {c_id}: {str(e)}", exc_info=True)
         raise MotionDetectionError(f"Motion detection failed for camera {c_id}: {str(e)}")
-    finally:
-        cv2.destroyWindow(f"Motion Detection - Camera {c_id}")
-        print(global_thread)
 
 
 def motion_start(c_id, s_id, typ, co, width, height, rtsp):

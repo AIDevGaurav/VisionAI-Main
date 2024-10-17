@@ -3,8 +3,9 @@ import threading
 import time
 import cv2
 import numpy as np
+from ultralytics import YOLO
 from app.exceptions import PCError
-from app.config import logger, global_thread, queues_dict, get_executor, YOLOv8armed
+from app.config import logger, global_thread, queues_dict, get_executor
 from app.mqtt_handler import publish_message_mqtt as pub
 from app.utils import capture_image, start_feature_processing
 from app.exceptions import ArmError
@@ -35,7 +36,7 @@ def capture_and_publish(frame, c_id, s_id, typ):
             "image": image_path,
         }
         pub("arm/detection", message)
-        logger.info(f"Published people message for camera {c_id}.")
+        logger.info(f"Published arm message for camera {c_id}.")
     except Exception as e:
         logger.error(f"Error capturing image or publishing MQTT for camera {c_id}: {str(e)}")
 
@@ -46,14 +47,13 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
     :return: Capture Image, Video and Publish Mqtt message
     """
     try:
-        model = YOLOv8armed()
+        model = YOLO('Model/armed.pt')
         last_detection_time = 0
 
         if coordinates and "points" in coordinates and coordinates["points"]:
             roi_points = np.array(set_roi_based_on_points(coordinates["points"], coordinates), dtype=np.int32)
             roi_mask = np.zeros((height, width), dtype=np.uint8)
             cv2.fillPoly(roi_mask, [roi_points], 255)  # Fill mask for the static ROI
-            logger.info(f"ROI set for motion detection on camera {camera_id}")
         else:
             roi_mask = None
 
@@ -63,50 +63,25 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
             if frame is None:
                 continue
 
-            # # Log the queue size
-            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-            # logger.info(f"armed: {queue_size}")
-
             if roi_mask is not None:
                 masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-                cv2.polylines(frame, [roi_points], isClosed=True, color=(255, 0, 0), thickness=2)
             else:
                 masked_frame = frame
 
             # Run YOLOv8 inference on the masked frame
-            results = model(masked_frame, verbose=False)
+            results = model(masked_frame, stream=True, verbose=False, classes = [0, 1])
 
-            for info in results:
-                parameters = info.boxes
-                for box in parameters:
-                    x1, y1, x2, y2 = box.xyxy[0]
-                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                    class_detect = int(box.cls[0])
+            for result in results:
+                if hasattr(result, 'boxes') and result.boxes.data.shape[0] > 0:
+                    if time.time() - last_detection_time > 10:
+                        executor.submit(capture_and_publish, frame, camera_id, s_id, typ)
+                        last_detection_time = time.time()
 
-                    if class_detect in [0, 1]:
-                        if time.time() - last_detection_time > 10:
-                            # Draw bounding box and label
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                            cv2.putText(frame, "Gun-Detected", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-                            executor.submit(capture_and_publish, frame, camera_id, s_id, typ)
-                            last_detection_time = time.time()
-
-            # Display the frame
-            cv2.imshow(f'Armed Person Detection - Camera {camera_id}', frame)
-
-            # frame_end_time = time.time()
-            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
-            # logger.info(f"Armed {frame_processing_time_ms:.2f} milliseconds.")
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            queues_dict[f"{camera_id}_{typ}"].task_done()
 
     except Exception as e:
         logger.error(f"Error During Armed detection:{str(e)}")
         return PCError(f"Armed Detection Failed for camera : {camera_id}")
-
-    finally:
-        cv2.destroyWindow(f'Armed Person Detection - Camera {camera_id}')
 
 
 def armed_start(c_id, s_id, typ, co, width, height, rtsp):
