@@ -13,16 +13,8 @@ executor = get_executor()
 
 # Function to adjust ROI points based on provided coordinates
 def set_roi_based_on_points(points, coordinates):
-    x_offset = coordinates["x"]
-    y_offset = coordinates["y"]
-
-    scaled_points = []
-    for point in points:
-        scaled_x = int(point[0] + x_offset)
-        scaled_y = int(point[1] + y_offset)
-        scaled_points.append((scaled_x, scaled_y))
-
-    return scaled_points
+    x_offset, y_offset = coordinates["x"], coordinates["y"]
+    return [(int(x + x_offset), int(y + y_offset)) for x, y in points]
 
 
 def capture_and_publish(frame, c_id, s_id, typ, count):
@@ -57,21 +49,21 @@ def people_count(camera_id, s_id, typ, coordinates, width, height, stop_event):
         previous_people_count = 0  # To track the previous count
 
         while not stop_event.is_set():
-            start_time = time.time()
+            # start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
-            # Log the queue size
-            queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-            logger.info(f"people---: {queue_size}")
+            # # Log the queue size
+            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            # logger.info(f"people---: {queue_size}")
 
             if roi_mask is not None:
                 masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
             else:
                 masked_frame = frame
 
-            results = model(masked_frame, stream=True, verbose=True, classes =[0], iou_thres = 0.4)
+            results = model(masked_frame, stream=True, verbose=True, classes =[0])
 
             # Initialize people count
             count = 0
@@ -86,8 +78,8 @@ def people_count(camera_id, s_id, typ, coordinates, width, height, stop_event):
                 previous_people_count = count  # Update the previous count
 
             queues_dict[f"{camera_id}_{typ}"].task_done()
-            frame_processing_time_ms = (time.time() - start_time) * 1000
-            logger.info(f"people----- {frame_processing_time_ms:.2f} milliseconds.")
+            # frame_processing_time_ms = (time.time() - start_time) * 1000
+            # logger.info(f"people----- {frame_processing_time_ms:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error During People Count:{str(e)}")

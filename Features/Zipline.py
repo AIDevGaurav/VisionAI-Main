@@ -84,14 +84,14 @@ def detect_zipline(camera_id, s_id, typ, coordinates, width, height, stop_event)
             roi_mask = None
 
         while not stop_event.is_set():
-            start_time = time.time()
+            # start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)
             if frame is None:
                 logger.warning(f"Received None frame for camera {camera_id}")
                 continue
-            # Log the queue size
-            queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-            logger.info(f"zipline---: {queue_size}")
+            # # Log the queue size
+            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            # logger.info(f"zipline---: {queue_size}")
 
             frame_count += 1
             if frame_count % frame_skip != 0:
@@ -139,9 +139,9 @@ def detect_zipline(camera_id, s_id, typ, coordinates, width, height, stop_event)
                                     executor.submit(capture_and_publish, frame, camera_id, s_id, typ, count)
 
             queues_dict[f"{camera_id}_{typ}"].task_done()
-            frame_end_time = time.time()
-            frame_processing_time_ms = (frame_end_time - start_time) * 1000
-            logger.info(f"zipline----- {frame_processing_time_ms:.2f} milliseconds.")
+            # frame_end_time = time.time()
+            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
+            # logger.info(f"zipline----- {frame_processing_time_ms:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error during zipline detection: {str(e)}")

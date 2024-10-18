@@ -5,3 +5,6 @@
 /.idea
 /logs
 /pub-sub_Mqtt.py
+__pycache__
+/app/__pycache__
+/Features/__pycache__

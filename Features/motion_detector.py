@@ -14,15 +14,8 @@ def set_roi_based_on_points(points, coordinates):
     """
     Scale and set ROI based on given points and coordinates.
     """
-    x_offset = coordinates["x"]
-    y_offset = coordinates["y"]
-
-    scaled_points = []
-    for point in points:
-        scaled_x = int(point[0] + x_offset)
-        scaled_y = int(point[1] + y_offset)
-        scaled_points.append((scaled_x, scaled_y))
-    return scaled_points
+    x_offset, y_offset = coordinates["x"], coordinates["y"]
+    return [(int(x + x_offset), int(y + y_offset)) for x, y in points]
 
 def capture_and_publish(frame, c_id, s_id, typ):
     try:

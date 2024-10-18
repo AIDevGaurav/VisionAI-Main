@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ultralytics import YOLO
 
 # MQTT Configuration
-broker = "172.25.112.1"
+broker = "192.168.1.23"
 port = 1883
 
 #Dictionary to hold executor thread

@@ -15,16 +15,8 @@ executor = get_executor()
 
 # Function to adjust ROI points based on provided coordinates
 def set_roi_based_on_points(points, coordinates):
-    x_offset = coordinates["x"]
-    y_offset = coordinates["y"]
-
-    scaled_points = []
-    for point in points:
-        scaled_x = int(point[0] + x_offset)
-        scaled_y = int(point[1] + y_offset)
-        scaled_points.append((scaled_x, scaled_y))
-
-    return scaled_points
+    x_offset, y_offset = coordinates["x"], coordinates["y"]
+    return [(int(x + x_offset), int(y + y_offset)) for x, y in points]
 
 def capture_and_publish(frame, c_id, s_id, typ):
     try:
@@ -58,7 +50,6 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
             roi_mask = None
 
         while not stop_event.is_set():
-            # start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
