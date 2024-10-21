@@ -5,13 +5,11 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from app.exceptions import PCError
-from app.config import logger, global_thread, queues_dict, get_executor
+from app.config import logger, global_thread, queues_dict, executor
 from app.mqtt_handler import publish_message_mqtt as pub
 from app.utils import capture_image, start_feature_processing
 from app.exceptions import ArmError
 
-
-executor = get_executor()
 
 # Function to adjust ROI points based on provided coordinates
 def set_roi_based_on_points(points, coordinates):
@@ -50,14 +48,16 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
             roi_mask = None
 
         while not stop_event.is_set():
+            # start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
-            if roi_mask is not None:
-                masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-            else:
-                masked_frame = frame
+            # # Log the queue size
+            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            # logger.info(f"zipline---: {queue_size}")
+
+            masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask) if roi_mask is not None else frame
 
             # Run YOLOv8 inference on the masked frame
             results = model(masked_frame, stream=True, verbose=False, classes = [0, 1])
@@ -69,6 +69,7 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
                         last_detection_time = time.time()
 
             queues_dict[f"{camera_id}_{typ}"].task_done()
+            # logger.info(f"people----- {(time.time() - start_time) * 1000:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error During Armed detection:{str(e)}")

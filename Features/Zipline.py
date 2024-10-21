@@ -5,14 +5,12 @@ import time
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from app.config import logger, global_thread, queues_dict, get_executor
+from app.config import logger, global_thread, queues_dict, executor
 from app.mqtt_handler import publish_message_mqtt as pub
 from Features.sort import Sort
 from app.utils import capture_image, start_feature_processing
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
-
-executor = get_executor()
 
 
 # Initialize SORT tracker
@@ -65,7 +63,7 @@ def detect_zipline(camera_id, s_id, typ, coordinates, width, height, stop_event)
         trackable_objects = {}
         last_count_time = {}
         debounce_time = 1
-        model = YOLO('Model/yolov8n.pt')
+        model = YOLO('Model/yolov8l.pt')
 
         # roi_mask = np.zeros((height, width), dtype=np.uint8)
 

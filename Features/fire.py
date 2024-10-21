@@ -5,13 +5,10 @@ from collections import deque
 import cv2
 import numpy as np
 from app.exceptions import PCError
-from app.config import logger, global_thread, queues_dict, get_executor
+from app.config import logger, global_thread, queues_dict, executor
 from app.mqtt_handler import publish_message_mqtt as pub
 from app.utils import capture_image, start_feature_processing
 from ultralytics import YOLO
-
-
-executor = get_executor()
 
 # Define parameters for fire detection
 FIRE_CONFIDENCE_THRESHOLD = 0.5
@@ -63,7 +60,7 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
     try:
 
         fire_model = YOLO('Model/fire.pt')
-        device_model = YOLO('Model/yolov8n.pt')
+        device_model = YOLO('Model/yolov8l.pt')
 
 
         # Define the devices we want to detect
@@ -89,10 +86,7 @@ def detect_fire(camera_id, s_id, typ, coordinates, width, height, stop_event):
             # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
             # logger.info(f"fire---: {queue_size}")
 
-            if roi_mask is not None:
-                masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-            else:
-                masked_frame = frame
+            masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask) if roi_mask is not None else frame
 
             # Detect devices first
             device_results = device_model(masked_frame, stream=True, verbose=False)

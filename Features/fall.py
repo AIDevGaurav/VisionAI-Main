@@ -6,7 +6,7 @@ from app.exceptions import FallError
 from app.utils import capture_image, \
     start_feature_processing  # Assuming capture_image and capture_video are defined in utils
 from app.mqtt_handler import publish_message_mqtt as pub  # Assuming you have an MQTT handler setup
-from app.config import logger, global_thread, get_executor, queues_dict
+from app.config import logger, global_thread, executor, queues_dict
 import cv2
 import time
 
@@ -29,8 +29,6 @@ def capture_and_publish(frame, c_id, s_id, typ):
         logger.info(f"Published fall message for camera {c_id}.")
     except Exception as e:
         logger.error(f"Error capturing image or publishing MQTT for camera {c_id}: {str(e)}")
-
-executor = get_executor()
 
 
 fall_detected_time = None  # To track when to remove the text
@@ -95,10 +93,7 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
             # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
             # logger.info(f"fall---: {queue_size}")
 
-            if roi_mask is not None:
-                masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-            else:
-                masked_frame = frame
+            masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask) if roi_mask is not None else frame
 
             # Run YOLOv8 inference on the masked frame
             results = model(masked_frame, conf=0.3, iou=0.4, stream=True, verbose=False)
@@ -118,9 +113,7 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
             if fall_detected_time and (time.time() - fall_detected_time) > 10:
                 executor.submit(capture_and_publish, camera_id, s_id, typ)
             queues_dict[f"{camera_id}_{typ}"].task_done()
-            # frame_end_time = time.time()
-            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
-            # logger.info(f"fall----- {frame_processing_time_ms:.2f} milliseconds.")
+            # logger.info(f"fall----- {(time.time() - start_time) * 1000= :.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error During Fall Detection:{str(e)}")

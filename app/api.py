@@ -6,13 +6,12 @@ from Features.Zipline import zipline_start, zipline_stop
 from Features.fall import fall_stop, fall_start
 from Features.motion_detector import motion_start, motion_stop
 from app.exceptions import CustomError, handle_exception
-from app.config import logger, get_executor
+from app.config import logger, executor
 from Features.people_count import start_pc, stop_pc
 from Features.fire import fire_stop, fire_start
 from Features.pet import pet_stop, pet_start
 
 api_blueprint = Blueprint('api', __name__)
-executor = get_executor()
 
 @api_blueprint.route('/start', methods=['POST'])
 def start():

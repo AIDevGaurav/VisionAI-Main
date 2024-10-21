@@ -4,8 +4,7 @@ from app.mqtt_handler import publish_message_mqtt as pub
 import cv2
 import time
 import os
-import psutil
-from app.config import logger, queues_dict, global_thread, get_executor
+from app.config import logger, queues_dict, global_thread, executor
 from app.exceptions import FrameError
 
 image_dir = "images"
@@ -57,18 +56,6 @@ def capture_video(rtsp_url):
         raise
 
 
-# def adjust_queue_size():
-#     while True:
-#         memory = psutil.virtual_memory()
-#         # Example: Adjust queue size based on available memory
-#         if memory.available < 500 * 1024 * 1024:  # Less than 500MB available
-#             frame_queue.maxsize = max(2, frame_queue.qsize() // 2)  # Reduce size, but ensure it is not less than 2
-#         else:
-#             frame_queue.maxsize = min(100, frame_queue.qsize() * 2)  # Increase size, max out at 100
-#
-#         time.sleep(10)  # Check every 10 seconds
-
-
 def capture_frame(rtsp, c_id, typ, w, h, stop_event):
     """Capture frames from the RTSP stream and put them into the buffer."""
     cap = cv2.VideoCapture(rtsp)
@@ -114,7 +101,6 @@ def start_feature_processing(c_id, typ, rtsp, width, height):
     Start processing for a specific camera and feature type.
     """
     key = f"{c_id}_{typ}"
-    executor = get_executor()
 
     # Initialize the queue if it doesn't exist
     if key not in queues_dict:

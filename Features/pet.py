@@ -4,12 +4,10 @@ import time
 import cv2
 import numpy as np
 from app.exceptions import PCError
-from app.config import logger, global_thread, queues_dict, get_executor
+from app.config import logger, global_thread, queues_dict, executor
 from app.mqtt_handler import publish_message_mqtt as pub
 from app.utils import capture_image, start_feature_processing
 from ultralytics import YOLO
-
-executor = get_executor()
 
 def create_mask(frame, boxes, padding=10):
     mask = np.ones(frame.shape[:2], dtype=np.uint8) * 255
@@ -54,9 +52,14 @@ def detect_pet(camera_id, s_id, typ, coordinates, width, height, stop_event):
         last_detection_time = 0
 
         while not stop_event.is_set():
+            # start_time = time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)
             if frame is None:
                 continue
+
+            #    # Log the queue size
+            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            # logger.info(f"pet---: {queue_size}")
 
             masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask) if roi_mask is not None else frame
         
@@ -79,6 +82,8 @@ def detect_pet(camera_id, s_id, typ, coordinates, width, height, stop_event):
                 last_detection_time = time.time()
 
             queues_dict[f"{camera_id}_{typ}"].task_done()
+            # logger.info(f"people----- {(time.time() - start_time) * 1000:.2f} milliseconds.")
+
 
     except Exception as e:
         logger.error(f"Error During Pet detection: {str(e)}")

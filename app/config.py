@@ -1,14 +1,9 @@
 import os
 import logging
 import threading
-
 import psutil
 from concurrent.futures import ThreadPoolExecutor
 from ultralytics import YOLO
-
-# MQTT Configuration
-broker = "192.168.1.23"
-port = 1883
 
 #Dictionary to hold executor thread
 global_thread = {}
@@ -17,10 +12,9 @@ global_thread = {}
 queues_dict = {}
 
 # Logging Configuration
-LOG_DIR = 'logs'
-os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs('logs', exist_ok=True)
 
-LOG_FILE = os.path.join(LOG_DIR, 'app.log')
+LOG_FILE = os.path.join('logs', 'app.log')
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -41,9 +35,7 @@ class Executor:
             cls._instance = ThreadPoolExecutor(max_workers= max_workers)
         return cls._instance
 
-# This will return the singleton executor
-def get_executor():
-    return Executor()
+executor = Executor()
 
 # class YOLOv8Single:
 #     def __init__(self):

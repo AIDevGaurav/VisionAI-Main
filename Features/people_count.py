@@ -5,11 +5,9 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from app.exceptions import PCError
-from app.config import logger, global_thread, queues_dict, get_executor
+from app.config import logger, global_thread, queues_dict, executor
 from app.mqtt_handler import publish_message_mqtt as pub
 from app.utils import capture_image, start_feature_processing
-
-executor = get_executor()
 
 # Function to adjust ROI points based on provided coordinates
 def set_roi_based_on_points(points, coordinates):
@@ -58,12 +56,9 @@ def people_count(camera_id, s_id, typ, coordinates, width, height, stop_event):
             # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
             # logger.info(f"people---: {queue_size}")
 
-            if roi_mask is not None:
-                masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
-            else:
-                masked_frame = frame
+            masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask) if roi_mask is not None else frame
 
-            results = model(masked_frame, stream=True, verbose=True, classes =[0])
+            results = model(masked_frame, stream=True, verbose=False, classes =[0])
 
             # Initialize people count
             count = 0
@@ -78,8 +73,7 @@ def people_count(camera_id, s_id, typ, coordinates, width, height, stop_event):
                 previous_people_count = count  # Update the previous count
 
             queues_dict[f"{camera_id}_{typ}"].task_done()
-            # frame_processing_time_ms = (time.time() - start_time) * 1000
-            # logger.info(f"people----- {frame_processing_time_ms:.2f} milliseconds.")
+            # logger.info(f"people----- {(time.time() - start_time) * 1000:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error During People Count:{str(e)}")

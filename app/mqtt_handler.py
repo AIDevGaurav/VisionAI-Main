@@ -1,13 +1,10 @@
 import os
 import paho.mqtt.client as mqtt
 import json
-from app.config import logger, broker, port
+from app.config import logger
 
 # Initialize the MQTT client once, globally
 mqtt_client = mqtt.Client(client_id=f"Gaurav_{os.getpid()}", clean_session=True)
-
-# Optional: Set username and password if needed
-# mqtt_client.username_pw_set(username="your_username", password="your_password")
 
 # Enable detailed logging
 mqtt_client.enable_logger()
@@ -40,7 +37,7 @@ mqtt_client.on_disconnect = on_disconnect
 # Connect and start the loop once when the app starts
 def start_mqtt_client():
     logger.info(f"Starting MQTT client with client_id={mqtt_client._client_id.decode()} and PID: {os.getpid()}")
-    mqtt_client.connect(broker, port, keepalive=600)
+    mqtt_client.connect("192.168.1.23", 1883, keepalive=600)
     mqtt_client.loop_start()
 
 
