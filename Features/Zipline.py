@@ -41,8 +41,8 @@ def capture_and_publish(frame, c_id, s_id, typ, count):
     except Exception as e:
         logger.error(f"Error capturing image or publishing MQTT for camera {c_id}: {str(e)}")
 
-def is_inside_roi(point, roi_points):
-    return cv2.pointPolygonTest(np.array(roi_points, np.int32), point, False) >= 0
+# def is_inside_roi(point, roi_points):
+#     return cv2.pointPolygonTest(np.array(roi_points, np.int32), point, False) >= 0
 
 def is_crossing_line(p1, p2, line_start, line_end):
     def ccw(A, B, C):
@@ -87,12 +87,14 @@ def detect_zipline(camera_id, s_id, typ, coordinates, width, height, stop_event)
             if frame is None:
                 logger.warning(f"Received None frame for camera {camera_id}")
                 continue
+
             # # Log the queue size
             # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
             # logger.info(f"zipline---: {queue_size}")
 
             frame_count += 1
             if frame_count % frame_skip != 0:
+                queues_dict[f"{camera_id}_{typ}"].task_done()
                 continue
 
             masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask)
@@ -122,24 +124,20 @@ def detect_zipline(camera_id, s_id, typ, coordinates, width, height, stop_event)
 
                 to.centroids.append(centroid)
 
-                if is_inside_roi(centroid, roi_points):
-                    if len(to.centroids) >= 2:
-                        prev_centroid = to.centroids[-2]
-                        current_centroid = to.centroids[-1]
+                if len(to.centroids) >= 2:
+                    prev_centroid = to.centroids[-2]
+                    current_centroid = to.centroids[-1]
 
-                        if is_crossing_line(prev_centroid, current_centroid, line_start, line_end):
-                            current_time = time.time()
-                            if current_time - last_count_time.get(object_id, 0) > debounce_time:
-                                if is_movement_in_arrow_direction(prev_centroid, current_centroid, arrow_start,
-                                                                  arrow_end):
-                                    count += 1
-                                    last_count_time[object_id] = current_time
-                                    executor.submit(capture_and_publish, frame, camera_id, s_id, typ, count)
+                    if is_crossing_line(prev_centroid, current_centroid, line_start, line_end):
+                        if time.time() - last_count_time.get(object_id, 0) > debounce_time:
+                            if is_movement_in_arrow_direction(prev_centroid, current_centroid, arrow_start,
+                                                                arrow_end):
+                                count += 1
+                                last_count_time[object_id] = time.time()
+                                executor.submit(capture_and_publish, frame, camera_id, s_id, typ, count)
 
             queues_dict[f"{camera_id}_{typ}"].task_done()
-            # frame_end_time = time.time()
-            # frame_processing_time_ms = (frame_end_time - start_time) * 1000
-            # logger.info(f"zipline----- {frame_processing_time_ms:.2f} milliseconds.")
+            # logger.info(f"zipline----- {(time.time() - start_time) * 1000:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error during zipline detection: {str(e)}")

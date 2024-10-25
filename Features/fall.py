@@ -83,12 +83,23 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
         else:
             roi_mask = None
 
+        frame_counter = 0  # Frame counter to track the number of frames processed
+
         while not stop_event.is_set():
-            # start_time = time.time()
+            # start_time=time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
+            # Increment the frame counter
+            frame_counter += 1
+
+            # Skip processing for every 5th frame
+            if frame_counter % 5 == 0:
+                queues_dict[f"{camera_id}_{typ}"].task_done()
+                continue  # Skip this frame and continue to the next iteration
+
+            
             # # Log the queue size
             # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
             # logger.info(f"fall---: {queue_size}")
@@ -96,7 +107,7 @@ def fall_detect(camera_id, s_id, typ, coordinates, width, height, stop_event):
             masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask) if roi_mask is not None else frame
 
             # Run YOLOv8 inference on the masked frame
-            results = model(masked_frame, conf=0.3, iou=0.4, stream=True, verbose=False)
+            results = model(masked_frame, stream=True, verbose=False)
 
             for result in results:
                 if result.keypoints.conf is not None:

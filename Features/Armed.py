@@ -47,15 +47,26 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
         else:
             roi_mask = None
 
+        frame_counter = 0  # Frame counter to track the number of frames processed
+
         while not stop_event.is_set():
-            # start_time = time.time()
+            # start_time=time.time()
             frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
+            # Increment the frame counter
+            frame_counter += 1
+
+            # Skip processing for every 5th frame
+            if frame_counter % 5 == 0:
+                queues_dict[f"{camera_id}_{typ}"].task_done()
+                continue  # Skip this frame and continue to the next iteration
+            
+
             # # Log the queue size
             # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
-            # logger.info(f"zipline---: {queue_size}")
+            # logger.info(f"Armed---: {queue_size}")
 
             masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask) if roi_mask is not None else frame
 
@@ -69,7 +80,7 @@ def detect_armed_person(camera_id, s_id, typ, coordinates, width, height, stop_e
                         last_detection_time = time.time()
 
             queues_dict[f"{camera_id}_{typ}"].task_done()
-            # logger.info(f"people----- {(time.time() - start_time) * 1000:.2f} milliseconds.")
+            # logger.info(f"Armed----- {(time.time() - start_time) * 1000:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error During Armed detection:{str(e)}")

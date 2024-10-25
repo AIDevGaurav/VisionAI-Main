@@ -1,9 +1,7 @@
 import os
 import logging
-import threading
 import psutil
 from concurrent.futures import ThreadPoolExecutor
-from ultralytics import YOLO
 
 #Dictionary to hold executor thread
 global_thread = {}
@@ -18,7 +16,7 @@ LOG_FILE = os.path.join('logs', 'app.log')
 
 logging.basicConfig(
     filename=LOG_FILE,
-    level=logging.DEBUG,
+    level=logging.CRITICAL,
     format='%(asctime)s %(levelname)s %(name)s %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )

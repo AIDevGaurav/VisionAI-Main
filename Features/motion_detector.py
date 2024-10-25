@@ -85,7 +85,7 @@ def detect_motion(c_id, s_id, typ, co, width, height, stop_event):
 
             prev_frame_gray = gray_frame
             queues_dict[f"{c_id}_{typ}"].task_done()
-            # logger.info(f"zipline----- {(time.time() - start_time) * 1000:.2f} milliseconds.")
+            # logger.info(f"Motion----- {(time.time() - start_time) * 1000:.2f} milliseconds.")
 
     except Exception as e:
         logger.error(f"Error during motion detection for camera {c_id}: {str(e)}", exc_info=True)

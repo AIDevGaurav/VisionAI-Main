@@ -1,6 +1,4 @@
-import threading
 from flask import Blueprint, request, jsonify
-from app.utils import start_feature_processing
 from Features.Armed import armed_stop, armed_start
 from Features.Zipline import zipline_start, zipline_stop
 from Features.fall import fall_stop, fall_start

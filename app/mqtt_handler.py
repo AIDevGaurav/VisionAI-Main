@@ -37,7 +37,7 @@ mqtt_client.on_disconnect = on_disconnect
 # Connect and start the loop once when the app starts
 def start_mqtt_client():
     logger.info(f"Starting MQTT client with client_id={mqtt_client._client_id.decode()} and PID: {os.getpid()}")
-    mqtt_client.connect("192.168.1.23", 1883, keepalive=600)
+    mqtt_client.connect("172.17.0.1", 1883, keepalive=600)
     mqtt_client.loop_start()
 
 
