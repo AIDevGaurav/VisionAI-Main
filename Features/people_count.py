@@ -35,99 +35,55 @@ def capture_and_publish(frame, c_id, s_id, typ, count):
     except Exception as e:
         logger.error(f"Error capturing image or publishing MQTT for camera {c_id}: {str(e)}")
 
-# Define function to load TensorRT engine
-def load_engine(engine_path):
-    TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-    with open(engine_path, "rb") as f, trt.Runtime(TRT_LOGGER) as runtime:
-        return runtime.deserialize_cuda_engine(f.read())
-
-# Initialize the engine
-engine = load_engine('Model/yolov8l.engine')
-
-# Create context and allocate buffers
-context = engine.create_execution_context()
-
-def allocate_buffers(engine):
-    inputs = []
-    outputs = []
-    bindings = []
-    stream = cuda.Stream()
-
-    for binding in engine:
-        size = trt.volume(engine.get_binding_shape(binding)) * engine.max_batch_size
-        dtype = trt.nptype(engine.get_binding_dtype(binding))
-
-        # Allocate device memory
-        buffer = cuda.mem_alloc(size * dtype.itemsize)
-
-        # Append the buffer to the appropriate list.
-        if engine.binding_is_input(binding):
-            inputs.append(buffer)
-        else:
-            outputs.append(buffer)
-
-        bindings.append(int(buffer))
-    return inputs, outputs, bindings, stream
-
-# Allocate buffers once outside of the function to avoid reallocation on each frame
-inputs, outputs, bindings, stream = allocate_buffers(engine)
 
 def people_count(camera_id, s_id, typ, coordinates, width, height, stop_event):
     try:
+        model = YOLO("Model/yolov8l.pt")
+
         if coordinates and "points" in coordinates and coordinates["points"]:
             roi_points = np.array(set_roi_based_on_points(coordinates["points"], coordinates), dtype=np.int32)
             roi_mask = np.zeros((height, width), dtype=np.uint8)
             cv2.fillPoly(roi_mask, [roi_points], 255)  # Fill mask for the static ROI
+            logger.info(f"ROI set for people detection on camera {camera_id}")
         else:
             roi_mask = None
 
-        previous_people_count = 0
-        frame_counter = 0
+        previous_people_count = 0  # To track the previous count
 
         while not stop_event.is_set():
-            frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)
+            start_time = time.time()
+            frame = queues_dict[f"{camera_id}_{typ}"].get(timeout=10)  # Handle timeouts if frame retrieval takes too long
             if frame is None:
                 continue
 
-            frame_counter += 1
-            if frame_counter % 5 == 0:
-                queues_dict[f"{camera_id}_{typ}"].task_done()
-                continue
+            # # Log the queue size
+            # queue_size = queues_dict[f"{camera_id}_{typ}"].qsize()
+            # logger.info(f"people: {queue_size}")
 
             masked_frame = cv2.bitwise_and(frame, frame, mask=roi_mask) if roi_mask is not None else frame
 
-            # Preprocess frame (resize, normalization, etc.)
-            input_frame = cv2.resize(masked_frame, (640, 640))  # Resize to model input size
-            input_frame = input_frame.transpose(2, 0, 1).astype(np.float32)  # HWC to CHW
-            input_frame /= 255.0  # Normalize to [0, 1]
+            # Run YOLOv8 inference on the masked frame
+            results = model(masked_frame, conf=0.3, iou=0.4, verbose=False)
 
-            # Transfer the input data to the GPU
-            cuda.memcpy_htod_async(inputs[0], input_frame, stream)
-
-            # Run inference
-            context.execute_async_v2(bindings=bindings, stream_handle=stream.handle)
-
-            # Transfer the output data from the GPU
-            output = np.empty((1, 25200, 85), dtype=np.float32)  # Adjust the output shape as per your model
-            cuda.memcpy_dtoh_async(output, outputs[0], stream)
-            stream.synchronize()
-
-            # Postprocess output (detect people based on class 0)
+            # Initialize people count
             count = 0
-            for detection in output[0]:
-                class_id = int(detection[5])
-                if class_id == 0:  # Class 0 is typically 'person'
+
+            # Iterate through detected objects
+            for box in results[0].boxes.data:
+                class_id = int(box[5])
+                if class_id == 0:  # Class ID 0 corresponds to 'person' in COCO
                     count += 1
 
+            # Publish the count to MQTT and capture the frame only if the count has changed
             if previous_people_count != count:
                 executor.submit(capture_and_publish, frame, camera_id, s_id, typ, count)
-                previous_people_count = count
+                previous_people_count = count  # Update the previous count
 
-            queues_dict[f"{camera_id}_{typ}"].task_done()
+            # logger.info(f"People_count {(time.time() - start_time) * 1000:.2f} milliseconds.")
 
     except Exception as e:
-        logger.error(f"Error During People Count: {str(e)}")
-        return PCError(f"People Count Failed for camera: {camera_id}")
+        logger.error(f"Error During People Count:{str(e)}")
+        return PCError(f"People Count Failed for camera : {camera_id}")
 
 
 
